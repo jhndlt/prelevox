@@ -20,26 +20,30 @@
     try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
   }
 
-  /* Catmull-Rom → cubiques de Bézier */
+  /* Courbe cubique monotone (Fritsch–Carlson) : lisse, sans dépassement ni boucle sur les marches. */
   function smoothPath(pts) {
     if (!pts.length) return '';
-    if (pts.length === 1) return 'M' + pts[0].x.toFixed(2) + ',' + pts[0].y.toFixed(2);
-    var d = 'M' + pts[0].x.toFixed(2) + ',' + pts[0].y.toFixed(2);
-    for (var i = 0; i < pts.length - 1; i++) {
-      var p0 = pts[Math.max(0, i - 1)];
-      var p1 = pts[i];
-      var p2 = pts[i + 1];
-      var p3 = pts[Math.min(pts.length - 1, i + 2)];
-      var c1x = p1.x + (p2.x - p0.x) / 6;
-      var c1y = p1.y + (p2.y - p0.y) / 6;
-      var c2x = p2.x - (p3.x - p1.x) / 6;
-      var c2y = p2.y - (p3.y - p1.y) / 6;
-      d += 'C' + c1x.toFixed(2) + ',' + c1y.toFixed(2) + ' ' + c2x.toFixed(2) + ',' + c2y.toFixed(2) + ' ' + p2.x.toFixed(2) + ',' + p2.y.toFixed(2);
+    var p = [pts[0]];
+    for (var k = 1; k < pts.length; k++) { if (pts[k].x - p[p.length - 1].x < 0.5) p[p.length - 1] = { x: p[p.length - 1].x, y: pts[k].y }; else p.push(pts[k]); }
+    if (p.length === 1) return 'M' + p[0].x.toFixed(2) + ',' + p[0].y.toFixed(2);
+    var n = p.length, dx = [], m = [], t = [], i;
+    for (i = 0; i < n - 1; i++) { dx[i] = p[i + 1].x - p[i].x; m[i] = (p[i + 1].y - p[i].y) / dx[i]; }
+    t[0] = m[0]; t[n - 1] = m[n - 2];
+    for (i = 1; i < n - 1; i++) t[i] = (m[i - 1] * m[i] <= 0) ? 0 : (m[i - 1] + m[i]) / 2;
+    for (i = 0; i < n - 1; i++) {
+      if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+      var a = t[i] / m[i], b = t[i + 1] / m[i], h = a * a + b * b;
+      if (h > 9) { var r = 3 / Math.sqrt(h); t[i] = r * a * m[i]; t[i + 1] = r * b * m[i]; }
+    }
+    var d = 'M' + p[0].x.toFixed(2) + ',' + p[0].y.toFixed(2);
+    for (i = 0; i < n - 1; i++) {
+      var c = dx[i] / 3;
+      d += 'C' + (p[i].x + c).toFixed(2) + ',' + (p[i].y + c * t[i]).toFixed(2) + ' ' + (p[i + 1].x - c).toFixed(2) + ',' + (p[i + 1].y - c * t[i + 1]).toFixed(2) + ' ' + p[i + 1].x.toFixed(2) + ',' + p[i + 1].y.toFixed(2);
     }
     return d;
   }
 
-  function sample(points, periodDays) {
+  function sample(points, periodDays, noExtend) {
     if (!points || !points.length) return [];
     var sorted = points.slice().sort(function (a, b) { return a.ts - b.ts; });
     var end = sorted[sorted.length - 1].ts;
@@ -55,7 +59,7 @@
       var before = null;
       for (var j = 0; j < sorted.length; j++) if (sorted[j].ts < out[0].ts) before = sorted[j];
       if (before) out.unshift({ ts: start, balance: before.balance });
-      else out.unshift({ ts: start, balance: out[0].balance });
+      else if (!noExtend) out.unshift({ ts: start, balance: out[0].balance });
     }
     return out;
   }
@@ -115,13 +119,14 @@
     return '1 an';
   }
 
-  function cardHtml(points, periodDays, emptyMsg) {
+  function cardHtml(points, periodDays, emptyMsg, opts) {
+    opts = opts || {};
     periodDays = periodDays || 30;
     if (!points || points.length < 2) {
       return '<div class="chart-card chart-empty" id="bal-chart">' +
         '<p>' + (emptyMsg || 'L\u2019historique apparaîtra après la première synchronisation.') + '</p></div>';
     }
-    var series = sample(points, periodDays);
+    var series = sample(points, periodDays, opts.noExtend);
     if (series.length < 2) {
       return '<div class="chart-card chart-empty" id="bal-chart"><p>' +
         (emptyMsg || 'L\u2019historique apparaîtra après la première synchronisation.') + '</p></div>';
@@ -131,9 +136,10 @@
     var uid = String(Date.now() % 1e9);
     var aria = 'Évolution du solde sur ' + periodLabel(periodDays) + ' : ' +
       fmtXmr(d.abs, true) + ' XMR (' + pct(d.rel) + ').';
-    return '<div class="chart-card' + (reduceMotion() ? ' reduce-motion' : '') + '" id="bal-chart" data-period="' + periodDays + '" aria-label="' + aria.replace(/"/g, '&quot;') + '">' +
+    return '<div class="chart-card' + (reduceMotion() ? ' reduce-motion' : '') + '" id="bal-chart"' + (opts.noExtend ? ' data-noext="1"' : '') + ' data-period="' + periodDays + '" aria-label="' + aria.replace(/"/g, '&quot;') + '">' +
       '<div class="chart-head"><div><small>Évolution</small>' +
-      '<div class="chart-delta ' + (d.up ? 'up' : 'down') + '">' + fmtXmr(d.abs, true) + ' XMR · ' + pct(d.rel) + '</div></div></div>' +
+      '<div class="chart-delta ' + (d.up ? 'up' : 'down') + '">' + fmtXmr(d.abs, true) + ' XMR' + (series[0].balance !== 0 ? ' · ' + pct(d.rel) : '') + '</div>' +
+      (opts.noExtend && series[0].ts > series[series.length - 1].ts - periodDays * 864e5 + 864e5 ? '<small class="chart-since">depuis le ' + new Date(series[0].ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + '</small>' : '') + '</div></div>' +
       '<div class="chart-periods" role="tablist" aria-label="Période du graphique">' +
       '<button type="button" role="tab" data-period="7"' + (periodDays === 7 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>7 j</button>' +
       '<button type="button" role="tab" data-period="30"' + (periodDays === 30 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>30 j</button>' +
@@ -151,7 +157,7 @@
     var svg = root.querySelector('.chart-svg');
     var cross = root.querySelector('.chart-cross');
     var scrub = root.querySelector('.chart-scrub');
-    var series = sample(getPoints(), period);
+    var series = sample(getPoints(), period, root.getAttribute('data-noext') === '1');
     var pts = layout(series);
 
     root.querySelectorAll('.chart-periods button').forEach(function (btn) {

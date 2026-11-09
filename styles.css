@@ -92,3 +92,23 @@ form.card{padding:2px 14px 14px}
 @media (prefers-reduced-motion:reduce){
   .chart-svg,.chart-line,.chart-area,.chart-dot,.chart-tip{transition:none!important}
 }
+
+/* --- Synchronisation réelle --- */
+.synccard{background:var(--c);border:1px solid #3a2414;border-radius:18px;padding:14px;margin:12px 0 6px}
+.sync-head{display:flex;align-items:center;gap:12px}
+.sync-head .t{flex:1;min-width:0}.sync-head .t b{display:block;font-size:15px}.sync-head .t small{display:block;color:var(--l);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spin{flex:none;width:22px;height:22px;border-radius:50%;border:2.5px solid rgba(255,102,0,.25);border-top-color:var(--o);animation:pxspin 1s linear infinite}
+@keyframes pxspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+.bar{height:8px;background:var(--c2);border-radius:99px;overflow:hidden;margin:12px 0 8px}.bar i{display:block;height:100%;background:var(--o);border-radius:99px;transition:width .4s ease}
+.sync-line{display:block;font-size:13px;color:#e9e9ec;font-weight:600}
+.sync-hint{display:block;font-size:12px;color:var(--l);margin-top:4px}
+.alert-acts{display:flex;gap:8px;margin-top:10px}.alert-acts .pill{text-decoration:none;display:inline-block}
+details.alert summary{cursor:pointer;list-style:none}details.alert summary::-webkit-details-marker{display:none}
+details.alert summary b::after{content:" ›";color:var(--o)}details.alert[open] summary{margin-bottom:6px}
+details.adv{margin:-4px 2px 14px}details.adv summary{color:var(--o);font-size:13px;font-weight:600;cursor:pointer}
+.node-test{min-height:18px;margin:8px 2px 4px}.node-test.ok{color:var(--in)}.node-test.bad{color:#ff8a8a}
+.empty small{display:block;margin-top:8px;font-size:12.5px;line-height:1.5;padding:0 8px}
+.chart-head .chart-since{display:block;font-size:11.5px;color:var(--l);margin-top:2px;font-weight:500;text-transform:none;letter-spacing:0}
+.card .btn.ghost{background:var(--c2)}
+.card .alert.info{background:var(--c2);margin:12px 0 14px}

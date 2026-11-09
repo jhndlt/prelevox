@@ -92,6 +92,14 @@
       for (var i = 0; i < rows.length; i++) { var o = await unseal(key, rows[i], kind + ':' + rows[i].id); o.id = rows[i].id; out.push(o); }
       return out;
     },
+    /* Lit un seul objet chiffré (null s'il n'existe pas). */
+    load: async function (kind, id) {
+      if (!key) throw new Error('Coffre verrouillé.');
+      touch();
+      var r = await get('items', id);
+      if (!r || r.kind !== kind) return null;
+      var o = await unseal(key, r, kind + ':' + id); o.id = id; return o;
+    },
     remove: function (id) { touch(); return del('items', id); },
     /* Efface tout : coffre, portefeuilles, réglages. */
     wipe: function () { lock(); return new Promise(function (res) { var r = indexedDB.deleteDatabase(DB); r.onsuccess = r.onerror = r.onblocked = function () { res(); }; }); },

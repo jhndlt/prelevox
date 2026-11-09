@@ -5,10 +5,13 @@
   var $app = document.getElementById('app'), $tab = document.getElementById('tabbar'), $toast = document.getElementById('toast');
   var DAY = 864e5;
   var KEY_MSG = 'Ce n\u2019est pas un portefeuille, c\u2019est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface.';
-  var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], chartPeriod: 30, settings: { provider: 'monero-ts', nodeUrl: '', lwsUrl: '' } };
+  var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], chartPeriod: 30,
+    settings: { provider: 'monero-ts', node: 'auto', customNode: '', lwsUrl: '', price: true },
+    sync: null, errors: {}, price: null, nodeTest: null };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function xmr(n, sign) { var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return sign ? (n >= 0 ? '+' : '\u2212') + s : (n < 0 ? '\u2212' : '') + s; }
+  function xmr(n, sign) { var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return sign ? (n === 0 ? '' : n > 0 ? '+' : '\u2212') + s : (n < 0 ? '\u2212' : '') + s; }
+  function nf(n) { return Number(n).toLocaleString('fr-FR'); }
   function eur(n) { return n.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' }); }
   function hm(ts) { return new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
   function dmy(ts) { return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }); }
@@ -16,6 +19,8 @@
   function inDays(ts) { var a = new Date(); a.setHours(0, 0, 0, 0); var b = new Date(ts); b.setHours(0, 0, 0, 0); return Math.round((b - a) / DAY); }
   function when(ts) { var d = inDays(ts); return d === 0 ? 'aujourd\u2019hui' : d === 1 ? 'demain' : 'dans ' + d + ' jours'; }
   function toast(t) { $toast.textContent = t; $toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(function () { $toast.classList.remove('show'); }, 2600); }
+  function hostOf(u) { try { return new URL(u).host; } catch (e) { return u; } }
+  function dur(sec) { if (!isFinite(sec) || sec <= 0) return ''; if (sec < 60) return 'moins d\u2019une minute'; var m = Math.round(sec / 60); if (m < 60) return 'environ ' + m + ' min'; var h = Math.floor(m / 60), r = m % 60; return 'environ ' + h + ' h' + (r ? ' ' + String(r).padStart(2, '0') : ''); }
   function uid() { return 'w' + Array.from(crypto.getRandomValues(new Uint8Array(8)), function (b) { return b.toString(16).padStart(2, '0'); }).join(''); }
   var ico = { lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>' };
 
@@ -27,6 +32,11 @@
     var manual = S.subs, det = Sync.detectRecurring(txsAll()).filter(function (d) { return !manual.some(function (m) { return Math.abs(m.amount - d.amount) < d.amount * 0.03 && m.walletId === d.walletId; }); });
     return manual.concat(det).map(function (s) { var n = s.nextTs, step = s.period === 'annuel' ? 365 : s.period === 'hebdomadaire' ? 7 : 30; while (n < Date.now() - DAY / 2) n += step * DAY; return Object.assign({}, s, { nextTs: n }); });
   }
+  function incomingAll() {
+    if (S.demo) return [];
+    return Sync.detectRecurringIn(txsAll()).map(function (s) { var n = s.nextTs, step = s.period === 'annuel' ? 365 : s.period === 'hebdomadaire' ? 7 : 30; while (n < Date.now() - DAY / 2) n += step * DAY; return Object.assign({}, s, { nextTs: n }); });
+  }
+  function unlockedTotal() { return wallets().reduce(function (a, w) { var r = S.results[w.id]; return a + (r ? (r.balance.unlocked != null ? r.balance.unlocked : r.balance.total) : 0); }, 0); }
   function wname(id) { var w = wallets().find(function (x) { return x.id === id; }); return w ? w.label : ''; }
   function widx(id) { return Math.max(0, wallets().findIndex(function (x) { return x.id === id; })) % 3; }
   function total() { return wallets().reduce(function (a, w) { var r = S.results[w.id]; return a + (r ? r.balance.total : 0); }, 0); }
@@ -35,34 +45,110 @@
     if (S.demo) return Demo.history();
     var ws = wallets();
     if (!ws.some(function (w) { return S.results[w.id]; })) return [];
-    var bal = total();
-    var list = txsAll().slice().sort(function (a, b) { return b.ts - a.ts; });
-    if (!list.length) return [{ ts: Date.now() - DAY, balance: bal }, { ts: Date.now(), balance: bal }];
-    var points = [{ ts: Date.now(), balance: bal }];
+    /* Courbe en marches : solde connu depuis la hauteur de restauration (avant : inconnu, non tracé). */
+    var since = Math.min.apply(null, ws.map(function (w) { var r = S.results[w.id]; return r && r.balance.restoreHeight != null ? Sync.dateFromHeight(r.balance.restoreHeight) : Date.now(); }));
+    var list = txsAll().filter(function (t) { return !t.pending; }).sort(function (a, b) { return a.ts - b.ts; });
+    var bal = total() - list.reduce(function (a, t) { return a + t.amount; }, 0) - txsAll().filter(function (t) { return t.pending; }).reduce(function (a, t) { return a + t.amount; }, 0);
+    var points = [{ ts: Math.min(since, list.length ? list[0].ts - 60000 : since), balance: Math.max(0, bal) }];
     for (var i = 0; i < list.length; i++) {
-      bal -= list[i].amount;
+      points.push({ ts: list[i].ts - 1000, balance: Math.max(0, bal) });
+      bal += list[i].amount;
       points.push({ ts: list[i].ts, balance: Math.round(Math.max(0, bal) * 1e4) / 1e4 });
     }
-    return points.sort(function (a, b) { return a.ts - b.ts; });
+    points.push({ ts: Date.now(), balance: total() });
+    return points;
   }
 
-  async function loadDemo() { S.results = {}; for (var i = 0; i < Demo.wallets.length; i++) S.results[Demo.wallets[i].id] = await Sync.get('demo').sync(Demo.wallets[i]); }
+  async function loadDemo() { S.results = {}; for (var i = 0; i < Demo.wallets.length; i++) S.results[Demo.wallets[i].id] = (await Sync.get('demo').sync(Demo.wallets[i])).result; }
   async function loadReal() {
     S.wallets = await V.list('wallet');
+    for (var i = 0; i < S.wallets.length; i++) { // anciens ajouts sans hauteur : jamais toute la chaîne, 30 jours avant l'ajout
+      var w = S.wallets[i];
+      if (!w.restoreHeight && !w.restoreSource) { w.restoreHeight = Sync.restoreHeightForDate((w.added || Date.now()) - 30 * DAY); w.restoreSource = 'default'; var id = w.id; delete w.id; await V.save('wallet', id, w); w.id = id; }
+    }
     S.subs = await V.list('sub');
     var cache = await V.list('cache'); S.results = {};
     cache.forEach(function (c) { S.results[c.id.replace(/^cache-/, '')] = c.data; });
   }
-  async function syncAll() {
+  /* Synchronisation réelle : un portefeuille après l'autre, reprise incrémentale depuis l'état chiffré. */
+  async function syncAll(onlyId) {
     if (S.demo) { await loadDemo(); toast('Démo actualisée (données fictives).'); return render(); }
+    if (S.sync) return toast('Synchronisation déjà en cours.');
+    if (!V.isOpen() || !S.wallets.length) return;
     var p = Sync.get(S.settings.provider);
-    if (!(await p.available())) { toast('Synchronisation indisponible : module « ' + p.label + ' » non installé.'); return; }
-    for (var i = 0; i < S.wallets.length; i++) {
-      var w = S.wallets[i];
-      try { var r = await p.sync(w, S.settings); S.results[w.id] = r; await V.save('cache', 'cache-' + w.id, { data: r }); }
-      catch (e) { toast(w.label + ' : ' + e.message); }
+    var job = S.sync = { cancelled: false, handle: null, walletId: null, label: '', pct: 0, remaining: null, preparing: true, node: '', started: Date.now(), rate: null, samples: [] };
+    paintSync(); 
+    var list = S.wallets.filter(function (w) { return !onlyId || w.id === onlyId; });
+    var okCount = 0;
+    for (var i = 0; i < list.length && !job.cancelled; i++) {
+      var w = list[i];
+      job.walletId = w.id; job.label = w.label; job.pct = 0; job.remaining = null; job.preparing = true; job.samples = []; job.step = (i + 1) + '/' + list.length;
+      paintSync();
+      try {
+        var state = p.id === 'monero-ts' ? await V.load('wstate', 'st-' + w.id) : null;
+        var out = await p.sync(w, S.settings, {
+          state: state,
+          isCancelled: function () { return job.cancelled; },
+          onHandle: function (h) { job.handle = h; },
+          onNode: function (u) { job.node = u; paintSync(); },
+          onProgress: function (info) {
+            V.touch(); // le coffre reste ouvert pendant une synchro active
+            job.pct = info.pct; job.remaining = info.remaining; job.preparing = info.preparing; job.end = info.end;
+            var now = Date.now(); job.samples.push([now, info.height]); while (job.samples.length > 2 && now - job.samples[0][0] > 30000) job.samples.shift();
+            var a = job.samples[0], b = job.samples[job.samples.length - 1];
+            if (b[0] - a[0] > 3000 && b[1] > a[1]) job.rate = (b[1] - a[1]) / ((b[0] - a[0]) / 1000);
+            paintSync();
+          },
+          onCheckpoint: function (st) { return V.save('wstate', 'st-' + w.id, st); }
+        });
+        S.results[w.id] = out.result; delete S.errors[w.id]; okCount++;
+        await V.save('cache', 'cache-' + w.id, { data: out.result });
+      } catch (e) {
+        if (e && e.cancelled) { job.cancelled = true; break; }
+        S.errors[w.id] = (e && e.message) || String(e);
+        if (!V.isOpen()) break;
+      }
     }
-    render();
+    S.sync = null;
+    if (job.cancelled) toast('Synchronisation annulée. La progression est conservée.');
+    else if (okCount === list.length) toast(okCount > 1 ? 'Portefeuilles synchronisés.' : 'Portefeuille synchronisé.');
+    if (V.isOpen()) render();
+  }
+  function cancelSync() {
+    var j = S.sync; if (!j) return;
+    j.cancelled = true; if (j.handle) j.handle.stop();
+    paintSync();
+  }
+  function syncHtml() {
+    var j = S.sync; if (!j) return '';
+    var pct = Math.round((j.pct || 0) * 1000) / 10;
+    var eta = j.rate && j.remaining ? dur(j.remaining / j.rate) : '';
+    var line = j.cancelled ? 'Arrêt en cours, sauvegarde de la progression…' :
+      !j.node ? 'Recherche d\u2019un nœud disponible…' :
+      j.preparing ? 'Préparation · téléchargement des repères de la chaîne…' :
+      pct.toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' % · ' + (j.remaining != null ? nf(j.remaining) + ' bloc' + (j.remaining > 1 ? 's' : '') + ' restant' + (j.remaining > 1 ? 's' : '') : '') + (eta ? ' · ' + eta : '');
+    return '<div class="synccard" id="syncbox" role="status" aria-live="polite"><div class="sync-head"><span class="spin" aria-hidden="true"></span><div class="t"><b>Synchronisation' + (S.wallets.length > 1 ? ' ' + esc(j.step || '') : '') + '</b><small>' + esc(j.label) + (j.node ? ' · nœud ' + esc(hostOf(j.node)) : '') + '</small></div>' +
+      (j.cancelled ? '' : '<button class="pill" data-act="cancel-sync">Annuler</button>') + '</div>' +
+      '<div class="bar"><i data-w="' + (j.preparing ? 2 : Math.max(2, pct)) + '"></i></div><small class="sync-line">' + line + '</small>' +
+      '<small class="sync-hint">Gardez l\u2019app ouverte : la progression est enregistrée (chiffrée) chaque minute.</small></div>';
+  }
+  function paintSync() {
+    var box = document.getElementById('syncbox'), html = syncHtml();
+    if (box && html) { // mise à jour sur place (pas de clignotement de la barre)
+      var tmp = document.createElement('div'); tmp.innerHTML = html; var nb = tmp.firstChild;
+      box.querySelector('.sync-head').innerHTML = nb.querySelector('.sync-head').innerHTML;
+      box.querySelector('.sync-line').textContent = nb.querySelector('.sync-line').textContent;
+      box.querySelector('.bar i').dataset.w = nb.querySelector('.bar i').dataset.w;
+    } else if (box) box.remove();
+    else { var slot = document.getElementById('syncslot'); if (slot) slot.innerHTML = html; }
+    applyBars();
+  }
+  /* La CSP interdit les attributs style : la largeur des barres est posée en JS. */
+  function applyBars() { document.querySelectorAll('.bar i[data-w]').forEach(function (i) { i.style.width = i.dataset.w + '%'; }); }
+  async function refreshPrice(force) {
+    if (S.demo || !S.settings.price) return;
+    if (!force && S.price && Date.now() - S.price.at < 10 * 60 * 1000) return;
+    try { S.price = await Sync.fetchPriceEur(); await V.setSetting('price', S.price); if (route() === 'soldes') { skipScroll = true; var y = window.scrollY; render(); window.scrollTo(0, y); } } catch (e) {}
   }
 
   /* ---------- Gabarits ---------- */
@@ -74,12 +160,12 @@
   }
   function txRow(t) {
     return '<div class="row"><span class="ic ' + (t.amount >= 0 ? 'c0' : '') + '">' + (t.amount >= 0 ? '↓' : '↑') + '</span><div class="t"><div>' + esc(t.label) + '</div><small>' +
-      hm(t.ts) + ' · ' + esc(wname(t.walletId)) + ' · ' + (t.confirmations >= 10 ? t.confirmations.toLocaleString('fr-FR') + ' confirmations' : (t.confirmations || 0) + '/10 confirmations') + '</small></div><b class="' + (t.amount >= 0 ? 'in' : '') + '">' +
+      (sameDay(t.ts, Date.now()) ? hm(t.ts) : dmy(t.ts) + ' ' + hm(t.ts)) + ' · ' + esc(wname(t.walletId)) + ' · ' + (t.pending ? 'en attente (mempool)' : t.confirmations >= 10 ? t.confirmations.toLocaleString('fr-FR') + ' confirmations' : (t.confirmations || 0) + '/10 confirmations') + '</small></div><b class="' + (t.amount >= 0 ? 'in' : '') + '">' +
       xmr(t.amount, true) + (t.approx ? '<span class="approx">estimée</span>' : '') + '</b></div>';
   }
   function subRow(s, withWhen) {
     return '<div class="row"><span class="ic">' + esc(s.icon || '↻') + '</span><div class="t"><div>' + esc(s.label) + '</div><small>' +
-      (withWhen ? when(s.nextTs) + ' · ' + dmy(s.nextTs) : s.period + ' · prochain le ' + dmy(s.nextTs)) + (s.source === 'détecté' ? ' · détecté' : '') + '</small></div><b>' + xmr(-s.amount, true) + '</b>' +
+      (withWhen ? when(s.nextTs) + ' · ' + dmy(s.nextTs) : s.period + ' · prochain le ' + dmy(s.nextTs)) + (s.source === 'détecté' && !/détect/.test(s.label) ? ' · détecté' : '') + '</small></div><b' + (s.incoming ? ' class="in"' : '') + '>' + xmr(s.incoming ? s.amount : -s.amount, true) + (s.approx ? '<span class="approx">estimé</span>' : '') + '</b>' +
       (!S.demo && s.source === 'manuel' && !withWhen ? '<button class="lockbtn" data-del-sub="' + esc(s.id) + '" aria-label="Supprimer">✕</button>' : '') + '</div>';
   }
   function note() { return '<p class="note"><strong>' + KEY_MSG + '</strong><br>Aucune clé de dépense · aucun envoi possible · clés chiffrées sur cet appareil.</p>'; }
@@ -101,19 +187,31 @@
   };
   views.soldes = function () {
     var ws = wallets(), t = total(), today = txsAll().filter(function (x) { return sameDay(x.ts, Date.now()); }).slice(0, 3);
-    var soon = subsAll().filter(function (s) { return inDays(s.nextTs) <= 14; }).sort(function (a, b) { return a.nextTs - b.nextTs; }).slice(0, 2);
+    var soon = subsAll().concat(incomingAll()).filter(function (s) { return inDays(s.nextTs) <= 14; }).sort(function (a, b) { return a.nextTs - b.nextTs; }).slice(0, 2);
     var synced = ws.some(function (w) { return S.results[w.id]; });
-    var h = header() + '<div class="hero"><small>Solde total · ' + ws.length + ' portefeuille' + (ws.length > 1 ? 's' : '') + ' (lecture seule)</small><h1>' + (synced ? xmr(t) : '—') + ' <em>XMR</em></h1>' +
-      '<p>' + (S.demo ? '≈ ' + eur(t * Demo.priceEur) + ' (exemple)' : synced ? 'Dernière synchro : ' + hm(Math.max.apply(null, ws.map(function (w) { return S.results[w.id] ? S.results[w.id].balance.syncedAt : 0; }))) : 'Pas encore synchronisé') + '</p>' +
+    var lastSync = Math.max.apply(null, [0].concat(ws.map(function (w) { return S.results[w.id] ? S.results[w.id].balance.syncedAt : 0; })));
+    var sub = S.demo ? '≈ ' + eur(t * Demo.priceEur) + ' (exemple)' :
+      !synced ? 'Pas encore synchronisé' :
+      (S.settings.price && S.price ? '≈ ' + eur(t * S.price.eur) + ' · ' : '') + 'Synchro ' + (sameDay(lastSync, Date.now()) ? 'à ' + hm(lastSync) : 'le ' + dmy(lastSync));
+    var h = header() + '<div class="hero"><small>Solde total' + (S.demo ? '' : ' estimé') + ' · ' + ws.length + ' portefeuille' + (ws.length > 1 ? 's' : '') + ' (lecture seule)</small><h1>' + (synced ? xmr(t) : '—') + ' <em>XMR</em></h1>' +
+      '<p>' + sub + '</p>' +
       '<div class="chips"><span>👁 View keys</span><span>🔒 Chiffré localement</span><span>⛔ Aucun envoi</span></div></div>';
-    h += Chart.cardHtml(historyPoints(), S.chartPeriod);
+    if (!S.demo) h += '<div id="syncslot">' + syncHtml() + '</div>';
+    if (!S.demo) ws.forEach(function (w) { if (S.errors[w.id] && !S.sync) h += '<div class="alert stop"><b>' + esc(w.label) + '</b> : ' + esc(S.errors[w.id]) + '<div class="alert-acts"><button class="pill on" data-act="sync">Réessayer</button><a class="pill" href="#/reglages">Choisir un nœud</a></div></div>'; });
+    if (!S.demo && ws.length && !synced && !S.sync && !Object.keys(S.errors).length) h += '<div class="alert info"><b>Première synchronisation</b><br>Prelevox va lire les blocs Monero depuis la date de création de votre portefeuille, directement sur cet appareil. Cela peut prendre quelques minutes.<button class="btn mt" data-act="sync">Lancer la synchronisation</button></div>';
+    h += Chart.cardHtml(historyPoints(), S.chartPeriod, S.demo ? undefined : 'Le graphique apparaîtra après la première synchronisation.', S.demo ? undefined : { noExtend: true });
     h += '<h2>Soldes <a href="#/ajouter">+ Ajouter</a></h2><div class="card">' + (ws.length ? ws.map(function (w, i) {
       var r = S.results[w.id];
-      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + '</small></div><b>' + (r ? xmr(r.balance.total) : '<span class="small">non synchronisé</span>') + '</b></div>';
+      var locked = r && !S.demo && r.balance.unlocked != null && r.balance.total - r.balance.unlocked > 1e-12;
+      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + '</small></div><b>' + (r ? xmr(r.balance.total) + (locked ? '<span class="approx">dont ' + xmr(r.balance.unlocked) + ' disponible</span>' : '') : '<span class="small">non synchronisé</span>') + '</b></div>';
     }).join('') : '<p class="empty">Aucun portefeuille pour l\u2019instant.</p>') + '</div>';
     h += '<h2>Opérations du jour <a href="#/operations">Tout voir</a></h2><div class="card">' + (today.length ? today.map(txRow).join('') : '<p class="empty">Aucune opération aujourd\u2019hui.</p>') + '</div>';
     h += '<h2>Bientôt <a href="#/bientot">Tout voir</a></h2><div class="card">' + (soon.length ? soon.map(function (s) { return subRow(s, true); }).join('') : '<p class="empty">Rien de prévu dans les 14 prochains jours.</p>') + '</div>';
-    if (!S.demo) h += '<button class="btn ghost mt" data-act="sync">Synchroniser</button>';
+    if (!S.demo) {
+      h += '<button class="btn ghost mt" data-act="sync"' + (S.sync ? ' disabled' : '') + '>Synchroniser</button>';
+      h += '<details class="alert info"><summary><b>Pourquoi « estimé » ?</b></summary>Avec une clé de visualisation, Monero montre avec certitude tout ce que vous <b>recevez</b>. Les <b>dépenses</b>, elles, ne sont visibles qu\u2019avec la clé de dépense, que Prelevox refuse. Si vous avez envoyé des fonds depuis ce portefeuille, le solde réel peut donc être plus bas que celui affiché.' +
+        (synced ? '<br><br>Données lues depuis le bloc ' + ws.map(function (w) { var r = S.results[w.id]; return r && r.balance.restoreHeight != null ? nf(r.balance.restoreHeight) + ' (≈ ' + dmy(Sync.dateFromHeight(r.balance.restoreHeight)) + ' ' + new Date(Sync.dateFromHeight(r.balance.restoreHeight)).getFullYear() + ')' : null; }).filter(Boolean).join(', ') + ' : les opérations plus anciennes ne sont pas comptées.' : '') + '</details>';
+    }
     return h + note();
   };
   views.operations = function () {
@@ -123,16 +221,17 @@
     var h = header() + '<h1 class="title">Opérations du jour</h1><p class="sub">' + new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + '</p>' +
       '<div class="kpis"><div class="kpi"><small>Entrées</small><b class="in">' + xmr(inn, true) + '</b></div><div class="kpi"><small>Sorties estimées</small><b>' + xmr(out, true) + '</b></div></div>' +
       '<h2>Aujourd\u2019hui</h2><div class="card">' + (today.length ? today.map(txRow).join('') : '<p class="empty">Aucune opération aujourd\u2019hui.</p>') + '</div>';
+    if (!S.demo && !wallets().some(function (w) { return S.results[w.id]; })) h += '<p class="note">Les opérations apparaîtront après la première synchronisation (onglet Soldes).</p>';
     var prev = all.filter(function (x) { return !sameDay(x.ts, Date.now()) && x.ts > Date.now() - 7 * DAY; });
     if (prev.length) h += '<h2>7 derniers jours</h2><div class="card">' + prev.map(txRow).join('') + '</div>';
-    return h + '<div class="alert info"><b>Pourquoi « estimée » ?</b> Avec une clé de visualisation, Monero montre avec certitude ce que vous recevez. Les sorties sont déduites sans la clé de dépense : leur montant peut être approximatif.</div>';
+    return h + '<div class="alert info"><b>Pourquoi « estimée » ?</b> Avec une clé de visualisation, Monero montre avec certitude ce que vous recevez. Les sorties sont déduites sans la clé de dépense : leur montant peut être approximatif' + (S.demo ? '' : ', et certaines peuvent ne pas apparaître du tout') + '.</div>';
   };
   views.bientot = function () {
-    var list = subsAll().filter(function (s) { return inDays(s.nextTs) <= 30; }).sort(function (a, b) { return a.nextTs - b.nextTs; });
-    var sum = list.reduce(function (a, s) { return a + s.amount; }, 0);
+    var list = subsAll().concat(incomingAll()).filter(function (s) { return inDays(s.nextTs) <= 30; }).sort(function (a, b) { return a.nextTs - b.nextTs; });
+    var sum = list.filter(function (s) { return !s.incoming; }).reduce(function (a, s) { return a + s.amount; }, 0);
     return header() + '<h1 class="title">Bientôt</h1><p class="sub">Paiements attendus dans les 30 prochains jours.</p>' +
       '<div class="kpis"><div class="kpi"><small>À prévoir</small><b>' + xmr(-sum, true) + '</b></div><div class="kpi"><small>Échéances</small><b>' + list.length + '</b></div></div>' +
-      '<h2>Calendrier</h2><div class="card">' + (list.length ? list.map(function (s) { return subRow(s, true); }).join('') : '<p class="empty">Rien de prévu. Ajoutez vos abonnements pour les voir ici.</p>') + '</div>' +
+      '<h2>Calendrier</h2><div class="card">' + (list.length ? list.map(function (s) { return subRow(s, true); }).join('') : (S.demo ? '<p class="empty">Rien de prévu. Ajoutez vos abonnements pour les voir ici.</p>' : '<p class="empty">Rien de prévu dans les 30 prochains jours.<br><small>Prelevox repère les montants identiques qui reviennent chaque semaine, mois ou année dans votre historique. Vous pouvez aussi ajouter vos abonnements dans l\u2019onglet Abonnements.</small></p>')) + '</div>' +
       '<p class="note">Prelevox vous prévient, mais ne paie rien : c\u2019est vous qui envoyez depuis votre portefeuille.</p>';
   };
   views.abonnements = function () {
@@ -140,7 +239,7 @@
     var monthly = list.reduce(function (a, s) { return a + (s.period === 'annuel' ? s.amount / 12 : s.period === 'hebdomadaire' ? s.amount * 52 / 12 : s.amount); }, 0);
     var h = header() + '<h1 class="title">Abonnements</h1><p class="sub">Détectés dans vos sorties ou ajoutés par vous.</p>' +
       '<div class="kpis"><div class="kpi"><small>Par mois (moyenne)</small><b>' + xmr(-monthly, true) + '</b></div><div class="kpi"><small>Par an</small><b>' + xmr(-monthly * 12, true) + '</b></div></div>' +
-      '<h2>Vos abonnements</h2><div class="card">' + (list.length ? list.map(function (s) { return subRow(s, false); }).join('') : '<p class="empty">Aucun abonnement pour l\u2019instant.</p>') + '</div>';
+      '<h2>Vos abonnements</h2><div class="card">' + (list.length ? list.map(function (s) { return subRow(s, false); }).join('') : '<p class="empty">Aucun abonnement pour l\u2019instant.' + (S.demo ? '' : '<br><small>Aucun paiement régulier n\u2019a été détecté. Avec une view key, les dépenses sont peu visibles : ajoutez vos abonnements ci-dessous pour être prévenu avant chaque échéance.</small>') + '</p>') + '</div>';
     if (S.demo) return h + '<p class="note">En démo, l\u2019ajout est désactivé. Ajoutez un vrai portefeuille pour gérer vos abonnements.</p>';
     return h + '<h2>Ajouter un abonnement</h2><form id="subf" class="card" ><div class="f mt"><label for="sl">Nom</label><input id="sl" required maxlength="40" placeholder="Ex. VPN, serveur…"></div>' +
       '<div class="f"><label for="sa">Montant (XMR)</label><input id="sa" required inputmode="decimal" placeholder="0,0300"></div>' +
@@ -159,7 +258,8 @@
       '<div class="f" id="fa"><label for="wa">Adresse principale <small>(commence par 4)</small></label><textarea id="wa" rows="3" spellcheck="false" autocapitalize="off" placeholder="4…"></textarea><div class="msg">Dans Feather, Cake Wallet ou Monero GUI : Recevoir → Adresse principale.</div></div>' +
       '<div class="f" id="fk"><label for="wk">Clé privée de visualisation <small>(view key, 64 caractères)</small></label><textarea id="wk" rows="2" spellcheck="false" autocapitalize="off" placeholder="Clé de visualisation privée"></textarea><div class="msg">Réglages du portefeuille → Clés → « Clé de visualisation privée » (Secret view key).</div></div>' +
       '<div class="alert stop hidden" id="stop"></div>' +
-      '<div class="f"><label for="wh">Hauteur de restauration <small>(facultatif, accélère la synchro)</small></label><input id="wh" inputmode="numeric" placeholder="Ex. 3 100 000"></div>' +
+      '<div class="f" id="fd"><label for="wd">Date de création du portefeuille <small>(approximative)</small></label><input id="wd" type="date" min="2014-04-18" max="' + new Date().toISOString().slice(0, 10) + '"><div class="msg" id="wdm"></div></div>' +
+      '<details class="adv"><summary>Je connais la hauteur de restauration</summary><div class="f mt"><label for="wh">Hauteur de bloc <small>(prioritaire sur la date)</small></label><input id="wh" inputmode="numeric" placeholder="Ex. 3 100 000"><div class="msg">Dans Feather ou Monero GUI : Réglages du portefeuille → « Restore height ».</div></div></details>' +
       '<div class="f"><label for="wapp">Application d\u2019origine <small>(facultatif)</small></label><select id="wapp"><option>Feather</option><option>Cake Wallet</option><option>Monero GUI</option><option>Monerujo</option><option>Stack Wallet</option><option>Autre</option></select></div>' +
       (needPass ? '<h2>Protection sur cet appareil</h2><div class="f"><label for="p1">Phrase secrète <small>(8 caractères minimum)</small></label><input id="p1" type="password" autocomplete="new-password"></div>' +
         '<div class="f" id="fp"><label for="p2">Confirmez la phrase secrète</label><input id="p2" type="password" autocomplete="new-password"><div class="msg">Elle chiffre vos clés (AES-256). Elle n\u2019est enregistrée nulle part et ne peut pas être récupérée.</div></div>' : '') +
@@ -172,11 +272,25 @@
     h += '<h2>Mode</h2><div class="card"><div class="row"><div class="t"><div>Mode démo</div><small>Données fictives, aucune connexion</small></div><button class="pill' + (S.demo ? ' on' : '') + '" data-act="' + (S.demo ? 'quit-demo' : 'demo') + '">' + (S.demo ? 'Activé' : 'Désactivé') + '</button></div></div>';
     if (!S.demo && V.isOpen()) {
       h += '<h2>Portefeuilles</h2><div class="card">' + (S.wallets.map(function (w) { return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small class="mono">' + esc(K.short(w.address)) + ' · view key chiffrée</small></div><button class="lockbtn" data-del-w="' + esc(w.id) + '" aria-label="Retirer">✕</button></div>'; }).join('') || '<p class="empty">Aucun.</p>') + '</div><a class="btn ghost mt" href="#/ajouter">Ajouter un portefeuille</a>';
-      h += '<h2>Synchronisation</h2><form id="setf" class="card"><div class="f mt"><label for="pv">Source</label><select id="pv">' + Object.keys(Sync.providers).filter(function (k) { return k !== 'demo'; }).map(function (k) { return '<option value="' + k + '"' + (p.provider === k ? ' selected' : '') + '>' + esc(Sync.providers[k].label) + '</option>'; }).join('') + '</select><div class="msg">' + esc(Sync.get(p.provider).description) + '</div></div>' +
-        '<div class="f"><label for="nu">Nœud Monero (monerod)</label><input id="nu" value="' + esc(p.nodeUrl) + '" placeholder="https://mon-noeud.exemple:18089"></div>' +
-        '<div class="f"><label for="lu">Serveur monero-lws <small>(si choisi)</small></label><input id="lu" value="' + esc(p.lwsUrl) + '" placeholder="https://lws.exemple"></div>' +
-        (Sync.get(p.provider).keysLeaveDevice ? '<div class="alert warn">Avec cette source, la view key est transmise à <b>votre</b> serveur pour qu\u2019il scanne. Elle ne permet aucun envoi, mais révèle vos entrées.</div>' : '') +
-        '<button class="btn">Enregistrer</button><div class="f"></div></form>';
+      var custom = p.node && p.node !== 'auto' && Sync.NODES.indexOf(p.node) < 0;
+      h += '<h2>Synchronisation</h2><form id="setf" class="card"><div class="f mt"><label for="pv">Source</label><select id="pv">' + Object.keys(Sync.providers).filter(function (k) { return k !== 'demo'; }).map(function (k) { return '<option value="' + k + '"' + (p.provider === k ? ' selected' : '') + '>' + esc(Sync.providers[k].label) + '</option>'; }).join('') + '</select><div class="msg">' + esc(Sync.get(p.provider).description) + '</div></div>';
+      if (p.provider !== 'lws') {
+        h += '<div class="f"><label for="nd">Nœud Monero</label><select id="nd"><option value="auto"' + (!p.node || p.node === 'auto' ? ' selected' : '') + '>Automatique (nœuds publics testés)</option>' +
+          Sync.NODES.map(function (u) { return '<option value="' + esc(u) + '"' + (p.node === u ? ' selected' : '') + '>' + esc(hostOf(u)) + '</option>'; }).join('') +
+          '<option value="custom"' + (custom ? ' selected' : '') + '>Mon propre nœud…</option></select></div>' +
+          '<div class="f' + (custom ? '' : ' hidden') + '" id="fcn"><label for="cn">Adresse de votre nœud <small>(https://)</small></label><input id="cn" inputmode="url" autocapitalize="off" spellcheck="false" value="' + esc(custom ? p.node : p.customNode || '') + '" placeholder="https://mon-noeud.exemple:18089"><div class="msg">Le nœud doit autoriser les requêtes du navigateur : lancez monerod avec <span class="mono">--rpc-access-control-origins=' + esc(location.origin) + '</span> derrière un certificat https.</div></div>' +
+          '<button type="button" class="btn ghost" data-act="test-node">Tester le nœud</button><div class="msg node-test" id="ntm">' + (S.nodeTest ? esc(S.nodeTest) : '') + '</div>' +
+          '<div class="alert info"><b>Confidentialité</b><br>Votre view key ne quitte jamais l\u2019appareil : le nœud ne fait que fournir des blocs. Il voit en revanche votre adresse IP et le moment où vous synchronisez. <b>Utiliser votre propre nœud est le plus privé.</b> Les nœuds .onion (Tor) ne sont pas joignables depuis un navigateur classique.</div>';
+      } else {
+        h += '<div class="f"><label for="lu">Serveur monero-lws</label><input id="lu" inputmode="url" autocapitalize="off" value="' + esc(p.lwsUrl) + '" placeholder="https://lws.exemple"></div>' +
+          '<div class="alert warn">Avec cette source, la view key est transmise à <b>votre</b> serveur pour qu\u2019il scanne. Elle ne permet aucun envoi, mais révèle vos entrées.</div>';
+      }
+      h += '<button class="btn">Enregistrer</button><div class="f"></div></form>';
+      h += '<h2>Contre-valeur en euros</h2><div class="card"><div class="row"><div class="t"><div>Afficher le solde en €</div><small>Cours XMR/EUR via CoinGecko (ou Kraken). Aucune adresse ni clé n\u2019est envoyée.</small></div><button class="pill' + (p.price ? ' on' : '') + '" data-act="toggle-price">' + (p.price ? 'Activé' : 'Désactivé') + '</button></div></div>';
+      h += '<h2>Données de synchronisation</h2><div class="card">' + S.wallets.map(function (w) {
+        var r = S.results[w.id];
+        return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small>Depuis le bloc ' + nf(w.restoreHeight || 0) + ' (≈ ' + new Date(Sync.dateFromHeight(w.restoreHeight || 0)).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) + ')' + (r ? ' · lu jusqu\u2019au bloc ' + nf(r.balance.height) : '') + '</small></div><button class="pill" data-rescan="' + esc(w.id) + '">Relire</button></div>';
+      }).join('') + '</div>';
       h += '<h2>Sécurité</h2><button class="btn ghost" data-act="lock">Verrouiller maintenant</button>';
     }
     if (S.vaultExists) h += '<button class="btn danger mt" data-act="wipe">Tout effacer de cet appareil</button>';
@@ -207,17 +321,33 @@
       if (p1) { passOk = p1.value.length >= 8 && p1.value === p2.value; if (p2.value) setF('fp', passOk ? 'ok' : 'bad', passOk ? '✓ Les deux phrases correspondent.' : p1.value.length < 8 ? '8 caractères minimum.' : 'Les deux phrases ne correspondent pas.'); }
       b.disabled = !(parsed && parsed.ok && parsed.network === 'mainnet' && keyRes && keyRes.ok && passOk && document.getElementById('wl').value.trim());
     }
+    var wd = document.getElementById('wd'), wh = document.getElementById('wh'), wdm = document.getElementById('wdm');
+    function restoreInfo() {
+      var hv = parseInt((wh.value || '').replace(/\D/g, ''), 10);
+      if (hv > 0) return { height: hv, src: 'height' };
+      if (wd.value) { var ts = new Date(wd.value + 'T00:00').getTime(); if (ts > 0) return { height: Sync.restoreHeightForDate(ts), src: 'date' }; }
+      return { height: Sync.restoreHeightForDate(Date.now() - 30 * DAY), src: 'default' };
+    }
+    function showRestore() {
+      var r = restoreInfo(), tip = Sync.heightFromDate(Date.now()), blocks = Math.max(0, tip - r.height);
+      var from = new Date(Sync.dateFromHeight(r.height)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      wdm.textContent = (r.src === 'default' ? 'Sans date, Prelevox lit les 30 derniers jours seulement (depuis le ' + from + '). Indiquez la date de création pour voir tout l\u2019historique.' :
+        'Lecture à partir du bloc ' + nf(r.height) + ' (≈ ' + from + (r.src === 'date' ? ', avec quelques jours de marge' : '') + ').') + ' Environ ' + nf(blocks) + ' blocs à lire' + (blocks > 200000 ? ' : la première synchro peut durer longtemps.' : '.');
+    }
+    wd.addEventListener('input', showRestore); wh.addEventListener('input', showRestore); showRestore();
     ['wa', 'wk', 'wl', 'p1', 'p2'].forEach(function (id) { var e = document.getElementById(id); if (e) e.addEventListener('input', check); });
     document.getElementById('addf').addEventListener('submit', async function (ev) {
       ev.preventDefault(); check(); if (b.disabled) return;
       b.disabled = true; b.textContent = 'Chiffrement…';
       try {
         if (!S.vaultExists) { await V.create(p1.value); S.vaultExists = true; }
+        var ri = restoreInfo();
         var w = { label: document.getElementById('wl').value.trim(), address: parsed.address, viewKey: k.value.trim().toLowerCase(),
-          restoreHeight: parseInt(document.getElementById('wh').value.replace(/\D/g, ''), 10) || 0, app: document.getElementById('wapp').value, added: Date.now() };
+          restoreHeight: ri.height, restoreSource: ri.src, app: document.getElementById('wapp').value, added: Date.now() };
         await V.save('wallet', uid(), w);
         k.value = ''; S.demo = false; await V.setSetting('demo', false);
         await loadReal(); toast('Portefeuille ajouté et chiffré sur cet appareil.'); location.hash = '#/soldes';
+        setTimeout(function () { syncAll(); refreshPrice(); }, 50);
       } catch (e) { toast(e.message); b.disabled = false; b.textContent = 'Ajouter en lecture seule'; }
     });
   }
@@ -244,6 +374,7 @@
     if (r === 'abonnements') bindSub();
     if (r === 'reglages') bindSettings();
     if (r === 'soldes') bindChart();
+    applyBars();
     if (!skipScroll) window.scrollTo(0, 0);
     skipScroll = false;
   }
@@ -260,7 +391,7 @@
   function bindUnlock() {
     document.getElementById('unlock').addEventListener('submit', async function (e) {
       e.preventDefault();
-      try { await V.unlock(document.getElementById('pw').value); await loadReal(); render(); }
+      try { await V.unlock(document.getElementById('pw').value); await loadReal(); render(); setTimeout(function () { syncAll(); refreshPrice(); }, 50); }
       catch (err) { document.getElementById('um').textContent = err.message; }
     });
   }
@@ -275,34 +406,77 @@
       S.subs = await V.list('sub'); toast('Abonnement enregistré (chiffré).'); render();
     });
   }
+  function readNodeChoice() {
+    var nd = document.getElementById('nd'); if (!nd) return S.settings.node;
+    if (nd.value === 'custom') return (document.getElementById('cn').value || '').trim();
+    return nd.value;
+  }
   function bindSettings() {
     var f = document.getElementById('setf'); if (!f) return;
-    document.getElementById('pv').addEventListener('change', function () { S.settings.provider = this.value; render(); });
+    document.getElementById('pv').addEventListener('change', function () { S.settings.provider = this.value; skipScroll = true; render(); });
+    var nd = document.getElementById('nd');
+    if (nd) nd.addEventListener('change', function () { document.getElementById('fcn').classList.toggle('hidden', nd.value !== 'custom'); S.nodeTest = null; document.getElementById('ntm').textContent = ''; });
     f.addEventListener('submit', async function (e) {
       e.preventDefault();
-      S.settings = { provider: document.getElementById('pv').value, nodeUrl: document.getElementById('nu').value.trim(), lwsUrl: document.getElementById('lu').value.trim() };
+      var node = readNodeChoice();
+      if (node !== 'auto') { try { node = Sync.checkNodeUrl(node); } catch (err) { document.getElementById('ntm').textContent = err.message; return; } }
+      S.settings = Object.assign({}, S.settings, { provider: document.getElementById('pv').value, node: node || 'auto',
+        customNode: nd && nd.value === 'custom' ? node : S.settings.customNode, lwsUrl: document.getElementById('lu') ? document.getElementById('lu').value.trim() : S.settings.lwsUrl });
       await V.setSetting('sync', S.settings); toast('Réglages enregistrés.');
     });
   }
+  async function testNodeUi() {
+    var m = document.getElementById('ntm'), node = readNodeChoice();
+    m.className = 'msg node-test'; m.textContent = 'Test en cours…';
+    try {
+      if (node === 'auto') {
+        var ok = 0, res = await Promise.all(Sync.NODES.map(function (u) { return Sync.testNode(u, 8000).then(function () { ok++; return true; }, function () { return false; }); }));
+        S.nodeTest = ok + ' nœud' + (ok > 1 ? 's' : '') + ' public' + (ok > 1 ? 's' : '') + ' sur ' + res.length + ' répond' + (ok > 1 ? 'ent' : '') + ' depuis ce navigateur.';
+        m.classList.add(ok ? 'ok' : 'bad');
+      } else {
+        var r = await Sync.testNode(node);
+        S.nodeTest = '✓ ' + hostOf(r.url) + ' répond : bloc ' + nf(r.height) + (r.restricted ? '' : ' · accès complet') + '.';
+        m.classList.add('ok');
+      }
+    } catch (err) { S.nodeTest = err.message; m.classList.add('bad'); }
+    m.textContent = S.nodeTest;
+  }
   document.addEventListener('click', async function (e) {
-    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub]'); if (!t) return;
+    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan]'); if (!t) return;
+    if (t.dataset.rescan) {
+      if (S.sync) return toast('Attendez la fin de la synchronisation en cours.');
+      if (confirm('Relire ce portefeuille depuis sa hauteur de restauration ? Cela peut prendre quelques minutes.')) { await V.remove('st-' + t.dataset.rescan); await V.remove('cache-' + t.dataset.rescan); delete S.results[t.dataset.rescan]; location.hash = '#/soldes'; syncAll(t.dataset.rescan); }
+      return;
+    }
     var a = t.dataset.act;
-    if (a === 'demo') { S.demo = true; await V.setSetting('demo', true); await loadDemo(); location.hash = '#/soldes'; render(); }
+    if (a === 'demo') { cancelSync(); S.demo = true; await V.setSetting('demo', true); await loadDemo(); location.hash = '#/soldes'; render(); }
     else if (a === 'quit-demo') { S.demo = false; await V.setSetting('demo', false); S.results = {}; if (V.isOpen()) await loadReal(); location.hash = '#/soldes'; render(); }
-    else if (a === 'lock') { V.lock(); }
-    else if (a === 'sync') { toast('Synchronisation…'); syncAll(); }
+    else if (a === 'lock') { cancelSync(); V.lock(); }
+    else if (a === 'sync') { S.errors = {}; syncAll(); if (!S.demo) { skipScroll = true; render(); } }
+    else if (a === 'cancel-sync') { cancelSync(); }
+    else if (a === 'test-node') { testNodeUi(); }
+    else if (a === 'toggle-price') { S.settings.price = !S.settings.price; await V.setSetting('sync', S.settings); if (S.settings.price) refreshPrice(true); else S.price = null; skipScroll = true; render(); }
     else if (a === 'wipe') { if (confirm('Effacer le coffre, les portefeuilles et les réglages de cet appareil ? Vos fonds ne sont pas concernés.')) { await V.wipe(); location.hash = '#/bienvenue'; location.reload(); } }
-    else if (t.dataset.delW) { if (confirm('Retirer ce portefeuille de Prelevox ? (Vos fonds ne bougent pas.)')) { await V.remove(t.dataset.delW); await V.remove('cache-' + t.dataset.delW); await loadReal(); render(); } }
+    else if (t.dataset.delW) { if (confirm('Retirer ce portefeuille de Prelevox ? (Vos fonds ne bougent pas.)')) { if (S.sync) cancelSync(); await V.remove(t.dataset.delW); await V.remove('cache-' + t.dataset.delW); await V.remove('st-' + t.dataset.delW); await loadReal(); render(); } }
     else if (t.dataset.delSub) { await V.remove(t.dataset.delSub); S.subs = await V.list('sub'); render(); }
   });
-  V.onChange(function () { S.wallets = []; S.results = S.demo ? S.results : {}; S.subs = []; render(); });
+  V.onChange(function () { cancelSync(); S.wallets = []; S.results = S.demo ? S.results : {}; S.subs = []; S.errors = {}; render(); });
   window.addEventListener('hashchange', render);
+  /* Retour au premier plan (iOS met les PWA en pause) : synchro incrémentale si la dernière date de plus de 10 min. */
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || S.demo || S.sync || !V.isOpen() || !S.wallets.length) return;
+    var last = Math.min.apply(null, S.wallets.map(function (w) { return S.results[w.id] ? S.results[w.id].balance.syncedAt : 0; }));
+    if (Date.now() - last > 10 * 60 * 1000) { S.errors = {}; syncAll(); refreshPrice(); }
+  });
 
   (async function boot() {
     try {
       S.vaultExists = await V.exists();
       S.demo = await V.getSetting('demo', false);
       S.settings = Object.assign(S.settings, await V.getSetting('sync', {}));
+      if (S.settings.nodeUrl && (!S.settings.node || S.settings.node === 'auto')) { S.settings.node = S.settings.nodeUrl; } delete S.settings.nodeUrl;
+      if (S.settings.provider === 'demo' || !Sync.providers[S.settings.provider]) S.settings.provider = 'monero-ts';
+      S.price = await V.getSetting('price', null);
       var q = new URLSearchParams(location.search);
       if (q.get('demo') === '1') { S.demo = true; await V.setSetting('demo', true); }
       if (S.demo) await loadDemo();

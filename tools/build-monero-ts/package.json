@@ -1,0 +1,2 @@
+{ "private": true, "name": "prelevox-build-monero-ts", "scripts": { "build": "node build.mjs && cp out/monero-ts.js node_modules/monero-ts/dist/monero.worker.js node_modules/monero-ts/LICENSE.txt node_modules/monero-ts/dist/monero.worker.js.LICENSE.txt ../../vendor/monero-ts/" },
+  "dependencies": { "monero-ts": "0.11.22", "assert": "^2.1.0", "process": "^0.11.10", "util": "^0.12.5" }, "devDependencies": { "esbuild": "0.28.2" } }
