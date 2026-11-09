@@ -70,3 +70,25 @@ input:focus,textarea:focus,select:focus{border-color:var(--o)}
 .pill{border:0;border-radius:12px;padding:8px 12px;font-weight:650;font-size:13px;cursor:pointer;background:var(--c2);color:var(--l)}.pill.on{background:var(--o);color:#140800}
 form.card{padding:2px 14px 14px}
 .tabbar[hidden]{display:none}
+
+/* --- Graphique d'évolution (accueil) --- */
+.chart-card{background:var(--c);border-radius:18px;padding:14px 14px 10px;margin:12px 0 6px;position:relative}
+.chart-card.chart-empty{padding:22px 16px}
+.chart-card.chart-empty p{color:var(--l);font-size:13.5px;text-align:center;line-height:1.5;margin:0}
+.chart-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.chart-head small{display:block;font-size:12px;color:var(--l);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
+.chart-delta{font-size:15px;font-weight:700;letter-spacing:-.01em}
+.chart-delta.up{color:var(--in)}.chart-delta.down{color:#ff8a8a}
+.chart-periods{display:flex;gap:6px;margin:12px 0 6px}
+.chart-periods button{border:0;background:var(--c2);color:var(--l);font-weight:650;font-size:12.5px;padding:7px 12px;border-radius:999px;cursor:pointer}
+.chart-periods button.on{background:rgba(255,102,0,.18);color:var(--o)}
+.chart-body{position:relative;margin:0 -2px}
+.chart-svg{width:100%;height:148px;display:block;touch-action:none;cursor:crosshair}
+.chart-line{transition:none}
+.chart-card:not(.reduce-motion) .chart-area{opacity:1}
+.chart-tip{position:absolute;pointer-events:none;background:#2a2b30;border:1px solid #3a3b40;border-radius:12px;padding:8px 10px;min-width:96px;z-index:2;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.chart-tip b{display:block;font-size:13px;font-weight:700;color:#fff}
+.chart-tip small{display:block;font-size:11.5px;color:var(--l);margin-top:2px}
+@media (prefers-reduced-motion:reduce){
+  .chart-svg,.chart-line,.chart-area,.chart-dot,.chart-tip{transition:none!important}
+}

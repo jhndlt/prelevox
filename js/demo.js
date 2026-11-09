@@ -9,6 +9,7 @@
     { id: 'demo-c', label: 'Épargne Démo C', app: 'Monero GUI', address: '89QaDEMOxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxdemo', color: '#4C4C4C', demo: true }
   ];
   var BAL = { 'demo-a': 8.2100, 'demo-b': 3.9730, 'demo-c': 0.3000 };
+  var TOTAL = 12.4830; /* = 8,2100 + 3,9730 + 0,3000 */
   function monthly(walletId, label, amount, dayOfMonth, months) {
     var out = [], now = new Date();
     for (var i = 1; i <= months; i++) {
@@ -41,8 +42,61 @@
       { id: 'demo-s4', walletId: 'demo-b', label: 'Stockage Démo', amount: 0.24, period: 'annuel', nextTs: new Date(now.getFullYear() + 1, 1, 2).getTime(), source: 'manuel', icon: '☁' }
     ];
   };
+
+  /* Historique fictif du solde total, cohérent avec les txs du jour et finissant à TOTAL. */
+  function history() {
+    var now = new Date(); now.setHours(12, 0, 0, 0);
+    var endTs = now.getTime();
+    /* Bornes (jours en arrière → solde). Les valeurs récentes collent aux opérations démo. */
+    var keys = [
+      [365, 8.4500],
+      [330, 8.6200],
+      [300, 8.9100],
+      [270, 9.0500],
+      [240, 9.1800],
+      [210, 9.4200],
+      [180, 9.7800],
+      [150, 10.0500],
+      [120, 10.2800],
+      [100, 10.4100],
+      [90, 10.5600],
+      [75, 10.7200],
+      [60, 11.0100],
+      [50, 11.1200],
+      [40, 11.2800],
+      [30, 11.4500],
+      [21, 11.6200],
+      [14, 11.7800],
+      [10, 11.8500],
+      [7, 11.9500],
+      [5, 11.8900],
+      [3, 12.0900], /* après la facture fictive +1,2 (net des abonnements) */
+      [1, 11.7109], /* avant les opérations du jour (+0,85 −0,12 +0,0421) */
+      [0, TOTAL]
+    ];
+    var points = [];
+    for (var i = 0; i < keys.length - 1; i++) {
+      var a = keys[i], b = keys[i + 1];
+      var from = a[0], to = b[0];
+      var steps = Math.max(1, from - to);
+      for (var s = 0; s < steps; s++) {
+        var daysAgo = from - s;
+        var t = s / steps;
+        /* Interpolation douce + légère ondulation déterministe */
+        var ease = t * t * (3 - 2 * t);
+        var bal = a[1] + (b[1] - a[1]) * ease;
+        bal += Math.sin(daysAgo * 0.37) * 0.018 + Math.cos(daysAgo * 0.11) * 0.012;
+        points.push({ ts: endTs - daysAgo * DAY, balance: Math.round(bal * 10000) / 10000 });
+      }
+    }
+    points.push({ ts: endTs, balance: TOTAL });
+    /* Garantit le dernier point exact */
+    points[points.length - 1].balance = TOTAL;
+    return points;
+  }
+
   root.PxDemo = {
-    wallets: WALLETS, subs: SUBS, priceEur: 159.2,
+    wallets: WALLETS, subs: SUBS, priceEur: 159.2, total: TOTAL, history: history,
     forWallet: function (id) {
       return { balance: { total: BAL[id] || 0, unlocked: BAL[id] || 0, height: 3512345, syncedAt: Date.now() }, txs: txs().filter(function (t) { return t.walletId === id; }), approxOut: true };
     }

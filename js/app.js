@@ -1,11 +1,11 @@
 /* Prelevox – application. Lecture seule : aucune fonction d'envoi n'existe dans ce code. */
 (function () {
   'use strict';
-  var K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync;
+  var K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync, Chart = self.PxChart;
   var $app = document.getElementById('app'), $tab = document.getElementById('tabbar'), $toast = document.getElementById('toast');
   var DAY = 864e5;
   var KEY_MSG = 'Ce n\u2019est pas un portefeuille, c\u2019est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface.';
-  var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], settings: { provider: 'monero-ts', nodeUrl: '', lwsUrl: '' } };
+  var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], chartPeriod: 30, settings: { provider: 'monero-ts', nodeUrl: '', lwsUrl: '' } };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function xmr(n, sign) { var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return sign ? (n >= 0 ? '+' : '\u2212') + s : (n < 0 ? '\u2212' : '') + s; }
@@ -30,6 +30,21 @@
   function wname(id) { var w = wallets().find(function (x) { return x.id === id; }); return w ? w.label : ''; }
   function widx(id) { return Math.max(0, wallets().findIndex(function (x) { return x.id === id; })) % 3; }
   function total() { return wallets().reduce(function (a, w) { var r = S.results[w.id]; return a + (r ? r.balance.total : 0); }, 0); }
+  /* Historique du solde total pour le graphique d'accueil */
+  function historyPoints() {
+    if (S.demo) return Demo.history();
+    var ws = wallets();
+    if (!ws.some(function (w) { return S.results[w.id]; })) return [];
+    var bal = total();
+    var list = txsAll().slice().sort(function (a, b) { return b.ts - a.ts; });
+    if (!list.length) return [{ ts: Date.now() - DAY, balance: bal }, { ts: Date.now(), balance: bal }];
+    var points = [{ ts: Date.now(), balance: bal }];
+    for (var i = 0; i < list.length; i++) {
+      bal -= list[i].amount;
+      points.push({ ts: list[i].ts, balance: Math.round(Math.max(0, bal) * 1e4) / 1e4 });
+    }
+    return points.sort(function (a, b) { return a.ts - b.ts; });
+  }
 
   async function loadDemo() { S.results = {}; for (var i = 0; i < Demo.wallets.length; i++) S.results[Demo.wallets[i].id] = await Sync.get('demo').sync(Demo.wallets[i]); }
   async function loadReal() {
@@ -91,6 +106,7 @@
     var h = header() + '<div class="hero"><small>Solde total · ' + ws.length + ' portefeuille' + (ws.length > 1 ? 's' : '') + ' (lecture seule)</small><h1>' + (synced ? xmr(t) : '—') + ' <em>XMR</em></h1>' +
       '<p>' + (S.demo ? '≈ ' + eur(t * Demo.priceEur) + ' (exemple)' : synced ? 'Dernière synchro : ' + hm(Math.max.apply(null, ws.map(function (w) { return S.results[w.id] ? S.results[w.id].balance.syncedAt : 0; }))) : 'Pas encore synchronisé') + '</p>' +
       '<div class="chips"><span>👁 View keys</span><span>🔒 Chiffré localement</span><span>⛔ Aucun envoi</span></div></div>';
+    h += Chart.cardHtml(historyPoints(), S.chartPeriod);
     h += '<h2>Soldes <a href="#/ajouter">+ Ajouter</a></h2><div class="card">' + (ws.length ? ws.map(function (w, i) {
       var r = S.results[w.id];
       return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + '</small></div><b>' + (r ? xmr(r.balance.total) : '<span class="small">non synchronisé</span>') + '</b></div>';
@@ -217,6 +233,7 @@
     } else if (r === 'bienvenue' || r === 'deverrouiller') r = 'soldes';
     return r;
   }
+  var skipScroll = false;
   function render() {
     var r = route();
     $app.innerHTML = views[r]();
@@ -226,7 +243,19 @@
     if (r === 'deverrouiller') bindUnlock();
     if (r === 'abonnements') bindSub();
     if (r === 'reglages') bindSettings();
-    window.scrollTo(0, 0);
+    if (r === 'soldes') bindChart();
+    if (!skipScroll) window.scrollTo(0, 0);
+    skipScroll = false;
+  }
+  function bindChart() {
+    if (!Chart) return;
+    Chart.bind(historyPoints, function (period) {
+      S.chartPeriod = period;
+      var y = window.scrollY;
+      skipScroll = true;
+      render();
+      window.scrollTo(0, y);
+    });
   }
   function bindUnlock() {
     document.getElementById('unlock').addEventListener('submit', async function (e) {
