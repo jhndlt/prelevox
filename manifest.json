@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "Prelevox – vos portefeuilles Monero en lecture seule",
+  "short_name": "Prelevox",
+  "description": "Ce n'est pas un portefeuille, c'est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface.",
+  "lang": "fr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0B0C",
+  "theme_color": "#0B0B0C",
+  "categories": ["finance"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
