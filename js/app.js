@@ -1,13 +1,14 @@
 /* Prelevox – application. Lecture seule : aucune fonction d'envoi n'existe dans ce code. */
 (function () {
   'use strict';
-  var K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync, Chart = self.PxChart, KI = self.PxKeyImages;
+  var PX = self.PxPrice, K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync, Chart = self.PxChart, KI = self.PxKeyImages;
   var $app = document.getElementById('app'), $tab = document.getElementById('tabbar'), $toast = document.getElementById('toast');
   var DAY = 864e5;
   var KEY_MSG = 'Ce n\u2019est pas un portefeuille, c\u2019est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface.';
   var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], chartPeriod: 30,
     settings: { provider: 'monero-ts', node: 'auto', customNode: '', lwsUrl: '', price: true },
-    sync: null, errors: {}, price: null, nodeTest: null, kis: {}, resume: null, wake: null };
+    sync: null, errors: {}, price: null, nodeTest: null, kis: {}, resume: null, wake: null,
+    prix: { period: '24h', cur: 'eur', snap: null, hist: null, err: null, loading: false, at: 0 }, alerts: [], sheet: { kind: 'above', cur: null } };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function xmr(n, sign) { var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return sign ? (n === 0 ? '' : n > 0 ? '+' : '\u2212') + s : (n < 0 ? '\u2212' : '') + s; }
@@ -301,7 +302,111 @@
       '<button class="btn" ' + (S.wallets.length ? '' : 'disabled') + '>Enregistrer (chiffré)</button><div class="f"></div></form>';
   };
   /* Solde exact : import des key images (fichier Feather ou monero-wallet-cli), tout reste sur l'appareil. */
+  /* ---------- Onglet Prix : cours du XMR, graphique, alertes ---------- */
+  var BELL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>';
+  function sym(cur) { return cur === 'usd' ? '$' : '€'; }
+  function ago(ts) { var s = Math.max(0, Math.round((Date.now() - ts) / 1000)), m = Math.floor(s / 60); return m ? 'il y a ' + m + ' min et ' + (s % 60) + ' s' : 'il y a ' + s + ' s'; }
+  function activeAlerts() { return S.alerts.filter(function (a) { return !(a.firedAt && a.kind !== 'change'); }).length; }
+  views.prix = function () {
+    var P = S.prix, sn = P.snap && P.snap.cur === P.cur ? P.snap : null, up = sn && sn.change >= 0;
+    var h = '<div class="pxtop"><div class="seg pxcur" role="radiogroup" aria-label="Devise">' + ['eur', 'usd'].map(function (c) { return '<button class="' + (P.cur === c ? 'on' : '') + '" data-pcur="' + c + '" aria-checked="' + (P.cur === c) + '" role="radio">' + sym(c) + '</button>'; }).join('') + '</div>' +
+      '<h1>Prix</h1><button class="bell" data-act="alerts" aria-label="Alertes de prix">' + BELL + (activeAlerts() ? '<i>' + activeAlerts() + '</i>' : '') + '</button></div>';
+    h += '<div class="pxhead"><small>Monero · XMR</small><div class="pxprice">' + (sn ? PX.fmt(sn.price, P.cur) : P.err ? '—' : '<span class="sk"></span>') + '</div>' +
+      (sn ? '<div class="pxchg"><span class="chg ' + (up ? 'up' : 'down') + '">' + (up ? '↗ +' : '↘ \u2212') + Math.abs(sn.change).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' %</span> 24 h</div>' : '') + '</div>';
+    h += '<div class="seg pxper" role="tablist">' + Object.keys(PX.PERIODS).map(function (k) { return '<button class="' + (P.period === k ? 'on' : '') + '" data-pper="' + k + '">' + PX.PERIODS[k].label + '</button>'; }).join('') + '</div>';
+    var hist = P.hist && P.hist.cur === P.cur && P.hist.period === P.period ? P.hist : null;
+    h += '<div class="pxchart">' + (hist ? PX.chartSvg(hist.points, P.period, P.cur) : P.err ? '<p class="empty">' + esc(P.err) + '</p>' : '<p class="empty">Chargement du cours…</p>') + '</div>';
+    if (hist) { var a = hist.points[0][1], b = hist.points[hist.points.length - 1][1], d = (b - a) / a * 100; h += '<p class="pxvar">Sur la période : <b class="' + (d >= 0 ? 'in' : 'neg') + '">' + (d >= 0 ? '+' : '\u2212') + Math.abs(d).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' %</b></p>'; }
+    h += '<h2>Statistiques</h2><div class="kpis"><div class="kpi"><small>Plus haut 24 h</small><b class="in">' + (sn ? PX.fmt(sn.high, P.cur) : '—') + '</b></div><div class="kpi"><small>Plus bas 24 h</small><b class="neg">' + (sn ? PX.fmt(sn.low, P.cur) : '—') + '</b></div></div>';
+    if (S.alerts.length) h += '<h2>Vos alertes <a href="#" data-act="alerts">Gérer</a></h2><div class="card pxalerts">' + S.alerts.map(alertRow).join('') + '</div>';
+    else h += '<button class="btn ghost mt" data-act="alerts">Créer une alerte de prix</button>';
+    h += '<p class="pxupd" id="pupd">' + (P.at ? 'Dernière mise à jour ' + ago(P.at) : '') + '</p><p class="note">Source : ' + esc((sn && sn.source) || 'CoinGecko') + (hist && hist.source !== (sn && sn.source) ? ' · historique : ' + esc(hist.source) : '') + '. Aucune adresse ni clé n\u2019est envoyée. Tirez l\u2019écran vers le bas pour actualiser.</p>';
+    return h;
+  };
+  function alertRow(a, inSheet) {
+    var fired = a.firedAt && a.kind !== 'change';
+    return '<div class="row"><span class="ic c0">' + (a.kind === 'above' ? '↗' : a.kind === 'below' ? '↘' : '%') + '</span><div class="t"><div>' + esc(PX.describe(a)) + '</div><small>' +
+      (fired ? 'déclenchée le ' + dmy(a.firedAt) + ' à ' + hm(a.firedAt) : a.firedAt ? 'active · dernière le ' + dmy(a.firedAt) + ' à ' + hm(a.firedAt) : 'active') + '</small></div>' +
+      (fired ? '<button class="pill" data-al-rearm="' + esc(a.id) + '">Réactiver</button>' : '') +
+      '<button class="lockbtn" data-al-del="' + esc(a.id) + '" aria-label="Supprimer l\u2019alerte">✕</button></div>';
+  }
+  async function loadPrice(force) {
+    var P = S.prix, cur = P.cur, period = P.period;
+    if (force) PX.clear();
+    P.loading = true; P.err = null; if (route() === 'prix') paintPrix();
+    try {
+      var r = await Promise.all([PX.snapshot(cur), PX.history(cur, period)]);
+      P.snap = r[0]; P.hist = { cur: cur, period: period, points: r[1].points, source: r[1].source }; P.at = Date.now();
+      await checkAlerts({ [cur]: r[0] });
+    } catch (e) { P.err = 'Cours indisponible pour le moment (CoinGecko et Kraken injoignables). Réessayez en tirant l\u2019écran vers le bas.'; }
+    P.loading = false; if (route() === 'prix') paintPrix();
+  }
+  function paintPrix() { if (S.sheet.open) return; skipScroll = true; var y = window.scrollY; render(); window.scrollTo(0, y); }
+  /* Vérifie toutes les alertes (dans chaque devise utilisée) : à l'ouverture, toutes les 2 min et à chaque actualisation. */
+  async function checkAlerts(snaps) {
+    if (!S.alerts.length) return;
+    snaps = snaps || {};
+    var curs = S.alerts.map(function (a) { return a.cur; }).filter(function (c, i, l) { return l.indexOf(c) === i && !snaps[c]; });
+    for (var i = 0; i < curs.length; i++) { try { snaps[curs[i]] = await PX.snapshot(curs[i]); } catch (e) {} }
+    var fired = PX.check(S.alerts, snaps);
+    if (!fired.length) return;
+    await V.setSetting('alerts', S.alerts);
+    if (S.sheet.open) { var inp = document.getElementById('alv'), keep = inp ? inp.value : ''; openSheet(); if (keep) document.getElementById('alv').value = keep; }
+    else if (route() === 'prix') paintPrix();
+    fired.forEach(function (f, i) { var msg = PX.message(f); setTimeout(function () { toast('🔔 ' + msg); }, i * 2800); notify('Alerte Prelevox', msg, f.alert.id); });
+  }
+  function notify(title, body, tag) {
+    try {
+      if (!('Notification' in self) || Notification.permission !== 'granted') return;
+      var o = { body: body, icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'px-' + tag, lang: 'fr' };
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) navigator.serviceWorker.ready.then(function (reg) { return reg.showNotification(title, o); }).catch(function () { try { new Notification(title, o); } catch (e) {} });
+      else new Notification(title, o);
+    } catch (e) {}
+  }
+  function notifState() {
+    if (!('Notification' in self)) return { s: 'na', t: navigator.standalone === false || /iPhone|iPad/.test(navigator.userAgent) ? 'Sur iPhone, les notifications demandent d\u2019ajouter Prelevox à l\u2019écran d\u2019accueil (Partager → « Sur l\u2019écran d\u2019accueil »), puis de l\u2019ouvrir depuis son icône.' : 'Ce navigateur ne permet pas les notifications. Les alertes s\u2019afficheront dans l\u2019app.' };
+    if (Notification.permission === 'granted') return { s: 'ok', t: 'Notifications activées sur cet appareil.' };
+    if (Notification.permission === 'denied') return { s: 'no', t: 'Notifications refusées : réactivez-les dans les réglages du système pour Prelevox.' };
+    return { s: 'ask', t: 'Recevez aussi une notification quand une alerte se déclenche.' };
+  }
+  function sheetHtml() {
+    var k = S.sheet.kind, cur = S.sheet.cur || S.prix.cur, ns = notifState(), sn = S.prix.snap;
+    return '<div class="sheet-bg" data-act="close-sheet"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shtt"><div class="grab"></div>' +
+      '<div class="sheet-h"><b id="shtt">Alertes de prix</b><button class="lockbtn" data-act="close-sheet" aria-label="Fermer">✕</button></div>' +
+      '<form id="alf"><div class="seg" role="radiogroup">' + [['above', 'Au-dessus de'], ['below', 'En-dessous de'], ['change', 'Variation']].map(function (x) { return '<button type="button" class="' + (k === x[0] ? 'on' : '') + '" data-alk="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="f mt"><label for="alv">' + (k === 'change' ? 'Variation sur 24 h (en %, hausse ou baisse)' : 'Prix du XMR') + '</label><div class="alin"><input id="alv" inputmode="decimal" autocomplete="off" required placeholder="' + (k === 'change' ? '5' : sn ? Math.round(sn.price * (k === 'above' ? 1.05 : 0.95)) : '600') + '">' +
+      (k === 'change' ? '<span class="unit">%</span>' : '<div class="seg alcur">' + ['eur', 'usd'].map(function (c) { return '<button type="button" class="' + (cur === c ? 'on' : '') + '" data-alc="' + c + '">' + sym(c) + '</button>'; }).join('') + '</div>') + '</div>' +
+      '<div class="msg">' + (k === 'change' ? 'Alerte au plus une fois par 24 h quand le cours bouge d\u2019au moins ce pourcentage.' : sn && sn.cur === cur ? 'Cours actuel : ' + PX.fmt(sn.price, cur) + '.' : '') + '</div></div>' +
+      '<button class="btn">Créer l\u2019alerte</button></form>' +
+      (S.alerts.length ? '<h2>Vos alertes</h2><div class="card">' + S.alerts.map(function (a) { return alertRow(a, true); }).join('') + '</div>' : '') +
+      '<div class="alert ' + (ns.s === 'ok' ? 'ok' : 'info') + ' mt"><b>Notifications</b><br>' + esc(ns.t) + (ns.s === 'ask' ? '<div class="alert-acts"><button class="pill on" data-act="notif">Activer les notifications</button></div>' : '') + '</div>' +
+      '<p class="small sheet-note">Les alertes sont enregistrées sur cet appareil et vérifiées quand Prelevox est ouvert (toutes les 2 minutes) et à chaque lancement. App fermée, aucune alerte ne peut partir.</p></div>';
+  }
+  function openSheet() {
+    S.sheet.open = true; S.sheet.cur = S.sheet.cur || S.prix.cur;
+    var w = document.getElementById('sheet'); if (!w) { w = document.createElement('div'); w.id = 'sheet'; w.className = 'sheet-wrap'; document.body.appendChild(w); }
+    w.innerHTML = sheetHtml(); document.documentElement.classList.add('sheet-open');
+    requestAnimationFrame(function () { w.classList.add('show'); });
+    bindSheet();
+  }
+  function closeSheet() {
+    S.sheet.open = false; var w = document.getElementById('sheet'); document.documentElement.classList.remove('sheet-open');
+    if (w) { w.classList.remove('show'); setTimeout(function () { if (!S.sheet.open) w.remove(); }, 260); }
+    if (route() === 'prix') paintPrix();
+  }
+  function bindSheet() {
+    var f = document.getElementById('alf'); if (!f) return;
+    f.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var v = parseFloat(String(document.getElementById('alv').value).replace(/\s/g, '').replace(',', '.'));
+      if (!(v > 0) || (S.sheet.kind === 'change' && v > 100)) return toast(S.sheet.kind === 'change' ? 'Indiquez un pourcentage entre 0 et 100.' : 'Indiquez un prix valide.');
+      S.alerts.push({ id: 'a' + uid().slice(1, 9), kind: S.sheet.kind, value: v, cur: S.sheet.kind === 'change' ? S.prix.cur : (S.sheet.cur || S.prix.cur), created: Date.now(), firedAt: 0 });
+      await V.setSetting('alerts', S.alerts); toast('Alerte créée : ' + PX.describe(S.alerts[S.alerts.length - 1]) + '.');
+      openSheet(); checkAlerts(S.prix.snap ? { [S.prix.snap.cur]: S.prix.snap } : null);
+    });
+  }
   views.exact = function () {
+
     var tab = S.kiTab || 'feather';
     var h = '<a class="back" href="#/soldes">‹ Retour</a><h1 class="title">Solde exact</h1>' +
       '<p class="sub">Avec la seule view key, Prelevox voit vos réceptions mais pas vos dépenses. Vos <b>key images</b> lui permettent de reconnaître les sorties déjà dépensées.</p>' +
@@ -378,6 +483,7 @@
       }
       h += '<button class="btn">Enregistrer</button><div class="f"></div></form>';
       h += '<h2>Solde exact</h2><div class="card"><div class="row"><div class="t"><div>Key images</div><small>' + (S.wallets.filter(function (w) { return S.kis[w.id]; }).length) + ' portefeuille' + (S.wallets.length > 1 ? 's' : '') + ' sur ' + S.wallets.length + ' avec key images importées</small></div><a class="pill" href="#/exact">Gérer</a></div></div>';
+      h += '<h2>Cours du XMR</h2><div class="card"><div class="row"><div class="t"><div>Devise de l\u2019onglet Prix</div><small>Euro par défaut. Les alertes gardent la devise choisie à leur création.</small></div></div><div class="opts">' + ['eur', 'usd'].map(function (c) { return '<button class="opt' + (S.prix.cur === c ? ' on' : '') + '" data-pcur="' + c + '">' + (c === 'eur' ? 'euro (€)' : 'dollar ($)') + '</button>'; }).join('') + '</div></div>';
       h += '<h2>Contre-valeur en euros</h2><div class="card"><div class="row"><div class="t"><div>Afficher le solde en €</div><small>Cours XMR/EUR via CoinGecko (ou Kraken). Aucune adresse ni clé n\u2019est envoyée.</small></div><button class="pill' + (p.price ? ' on' : '') + '" data-act="toggle-price">' + (p.price ? 'Activé' : 'Désactivé') + '</button></div></div>';
       h += '<h2>Données de synchronisation</h2><div class="card">' + S.wallets.map(function (w) {
         var r = S.results[w.id];
@@ -445,11 +551,12 @@
   }
 
   /* ---------- Rendu & navigation ---------- */
-  var TABS = ['soldes', 'operations', 'bientot', 'abonnements', 'reglages'];
+  var TABS = ['soldes', 'prix', 'operations', 'bientot', 'abonnements', 'reglages'];
   function route() {
     var r = (location.hash.replace(/^#\/?/, '') || 'soldes').split('?')[0];
     if (!views[r]) r = 'soldes';
     if (!S.demo) {
+      if (r === 'prix') return r; // cours public : accessible sans coffre
       if (!S.vaultExists && r !== 'ajouter' && r !== 'reglages') r = 'bienvenue';
       else if (S.vaultExists && !V.isOpen()) r = 'deverrouiller';
     } else if (r === 'bienvenue' || r === 'deverrouiller') r = 'soldes';
@@ -467,6 +574,7 @@
     if (r === 'reglages') bindSettings();
     if (r === 'soldes') bindChart();
     if (r === 'exact') bindExact();
+    if (r === 'prix') { tickUpdated(); if (!S.prix.snap && !S.prix.loading) loadPrice(false); }
     applyBars();
     if (!skipScroll) window.scrollTo(0, 0);
     skipScroll = false;
@@ -563,7 +671,13 @@
     m.textContent = S.nodeTest;
   }
   document.addEventListener('click', async function (e) {
-    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del],button[data-ui]'); if (!t) return;
+    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del],button[data-ui],[data-pcur],[data-pper],[data-alk],[data-alc],[data-al-del],[data-al-rearm]'); if (!t) return;
+    if (t.dataset.pcur) { S.prix.cur = t.dataset.pcur; S.sheet.cur = null; await V.setSetting('priceCur', S.prix.cur); if (route() === 'prix') { paintPrix(); loadPrice(false); } else { skipScroll = true; render(); } return; }
+    if (t.dataset.pper) { S.prix.period = t.dataset.pper; paintPrix(); loadPrice(false); return; }
+    if (t.dataset.alk) { S.sheet.kind = t.dataset.alk; openSheet(); return; }
+    if (t.dataset.alc) { S.sheet.cur = t.dataset.alc; openSheet(); return; }
+    if (t.dataset.alDel) { S.alerts = S.alerts.filter(function (a) { return a.id !== t.dataset.alDel; }); await V.setSetting('alerts', S.alerts); toast('Alerte supprimée.'); if (S.sheet.open) openSheet(); else paintPrix(); return; }
+    if (t.dataset.alRearm) { S.alerts.forEach(function (a) { if (a.id === t.dataset.alRearm) a.firedAt = 0; }); await V.setSetting('alerts', S.alerts); toast('Alerte réactivée.'); if (S.sheet.open) openSheet(); else paintPrix(); return; }
     if (t.dataset.ui && t.tagName === 'BUTTON') { if (self.PxTheme) PxTheme.set(t.dataset.ui); toast(t.dataset.ui === 'matrix' ? 'Apparence « matrix » activée.' : 'Apparence « classique » activée.'); skipScroll = true; var y1 = window.scrollY; render(); window.scrollTo(0, y1); return; }
     if (t.dataset.kitab) { S.kiTab = t.dataset.kitab; skipScroll = true; var y0 = window.scrollY; render(); window.scrollTo(0, y0); return; }
     if (t.dataset.kiOut) {
@@ -592,6 +706,9 @@
     else if (a === 'lock') { cancelSync(); V.lock(); }
     else if (a === 'sync') { S.errors = {}; syncAll(); if (!S.demo) { skipScroll = true; render(); } }
     else if (a === 'cancel-sync') { cancelSync(); }
+    else if (a === 'alerts') { e.preventDefault(); openSheet(); }
+    else if (a === 'close-sheet') { closeSheet(); }
+    else if (a === 'notif') { try { await Notification.requestPermission(); } catch (err) {} if (S.sheet.open) openSheet(); }
     else if (a === 'test-node') { testNodeUi(); }
     else if (a === 'toggle-price') { S.settings.price = !S.settings.price; await V.setSetting('sync', S.settings); if (S.settings.price) refreshPrice(true); else S.price = null; skipScroll = true; render(); }
     else if (a === 'wipe') { if (confirm('Effacer le coffre, les portefeuilles et les réglages de cet appareil ? Vos fonds ne sont pas concernés.')) { await V.wipe(); location.hash = '#/bienvenue'; location.reload(); } }
@@ -621,10 +738,35 @@
       if (S.settings.nodeUrl && (!S.settings.node || S.settings.node === 'auto')) { S.settings.node = S.settings.nodeUrl; } delete S.settings.nodeUrl;
       if (S.settings.provider === 'demo' || !Sync.providers[S.settings.provider]) S.settings.provider = 'monero-ts';
       S.price = await V.getSetting('price', null);
+      S.prix.cur = await V.getSetting('priceCur', 'eur'); S.alerts = await V.getSetting('alerts', []);
       var q = new URLSearchParams(location.search);
       if (q.get('demo') === '1') { S.demo = true; await V.setSetting('demo', true); }
       if (S.demo) await loadDemo();
     } catch (e) { console.error(e); }
     render();
+    if (S.alerts.length) checkAlerts(); // à chaque lancement
+    if (self.PxPtr) PxPtr.init({
+      canStart: function () { var r = route(); return !S.sheet.open && ['soldes', 'prix', 'operations', 'bientot', 'abonnements'].indexOf(r) >= 0; },
+      onRefresh: refreshAll
+    });
   })();
+  /* Tirer pour actualiser : synchro (vrai portefeuille) ou données de démo, puis cours et alertes. */
+  async function refreshAll() {
+    var jobs = [loadPrice(true)];
+    if (S.demo) { jobs.push(loadDemo().then(function () { if (route() !== 'prix') { skipScroll = true; render(); } })); }
+    else if (V.isOpen() && S.wallets.length && route() !== 'prix') {
+      jobs.push(refreshPrice(true));
+      if (!S.sync) { S.errors = {}; jobs.push(syncAll()); }
+    }
+    await Promise.all(jobs.map(function (p) { return Promise.resolve(p).catch(function () {}); }));
+    if (S.demo && route() !== 'prix') toast('Démo actualisée (données fictives).');
+  }
+  function tickUpdated() {
+    clearInterval(tickUpdated.t);
+    tickUpdated.t = setInterval(function () { var el = document.getElementById('pupd'); if (!el) return clearInterval(tickUpdated.t); if (S.prix.at) el.textContent = 'Dernière mise à jour ' + ago(S.prix.at); }, 1000);
+  }
+  setInterval(function () { // cours et alertes toutes les 2 min tant que l'app est visible
+    if (document.visibilityState !== 'visible') return;
+    if (route() === 'prix') loadPrice(true); else if (S.alerts.length) checkAlerts();
+  }, 120000);
 })();

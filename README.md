@@ -83,3 +83,10 @@ Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et �
 - `js/chart.js` graphique d'évolution (courbe monotone). `js/demo.js` données fictives. `js/app.js` écrans.
 - `vendor/monero-ts/` bibliothèque Monero (MIT) : ~4,3 Mo (≈ 2,2 Mo compressés), chargée seulement à la première synchro puis mise en cache par le service worker.
 - `tools/build-monero-ts/` reconstruction du bundle navigateur (esbuild). `sw.js` cache hors ligne (version `prelevox-v3`).
+
+## v6 (local) : tirer pour actualiser, onglet Prix, alertes
+
+- **Tirer pour actualiser** (`js/ptr.js`) : repris de Prelevo (écart 92 px, radar `px-radar` + onde `px-ping`, durée minimale 1,8 s), avec élastique et seuil à 64 px. Vrai portefeuille : synchro + cours ; démo : données rechargées ; onglet Prix : cours relu. Ignoré si la page n'est pas tout en haut, si le geste est horizontal, sur le graphique interactif de l'accueil et dans la feuille d'alertes. `prefers-reduced-motion` : pas d'animation.
+- **Onglet Prix** (`js/price.js`) : cours XMR en € (ou $), variation 24 h, périodes 24 h / 1 S / 1 M / 1 A / Tout, plus haut / plus bas 24 h. CoinGecko puis Kraken en secours, sans clé ni adresse envoyée. « Tout » vient de Kraken (CoinGecko public est limité à 365 jours).
+- **Alertes de prix** : au-dessus / en-dessous d'un prix (€ ou $), ou variation de X % en 24 h. Elles sont enregistrées sur l'appareil et vérifiées à l'ouverture puis toutes les 2 min tant que l'app est ouverte. Elles s'affichent dans l'app et, si vous l'autorisez, en notification. Sur iPhone, la notification demande d'avoir ajouté l'app à l'écran d'accueil. **Une fois l'app fermée, aucune alerte ne part** (il faudrait un serveur Web Push, non déployé).
+- Tests : `node tests/price.test.js`, `python3 tests/e2e-ptr-prix.py` (captures 43 à 51).
