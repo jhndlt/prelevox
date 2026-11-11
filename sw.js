@@ -1,7 +1,7 @@
 /* Prelevox – service worker : coque de l'app hors ligne. Ne met JAMAIS en cache une requête vers un nœud ou un serveur. */
-const CACHE = 'prelevox-v4';
+const CACHE = 'prelevox-v5';
 const VENDOR = 'prelevox-vendor-monero-ts-0.11.22'; // module Monero (~4 Mo) : mis en cache à la première synchro, puis servi hors ligne
-const ASSETS = ['./', './index.html', './styles.css?v=4', './manifest.json', './js/keys.js?v=4', './js/vault.js?v=4', './js/demo.js?v=4', './js/chart.js?v=4', './js/keyimages.js?v=4', './js/sync.js?v=4', './js/app.js?v=4', './js/register-sw.js?v=4',
+const ASSETS = ['./', './index.html', './styles.css?v=5', './manifest.json', './js/theme.js?v=5', './js/keys.js?v=5', './js/vault.js?v=5', './js/demo.js?v=5', './js/chart.js?v=5', './js/keyimages.js?v=5', './js/sync.js?v=5', './js/app.js?v=5', './js/register-sw.js?v=5',
   './fonts/inter-latin.woff2', './icons/mark.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/favicon-32.png', './icons/apple-touch-icon-180.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== CACHE && x !== VENDOR).map(x => caches.delete(x)))).then(() => self.clients.claim())));

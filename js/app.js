@@ -252,7 +252,7 @@
       var r = S.results[w.id];
       var locked = r && !S.demo && r.balance.unlocked != null && r.balance.total - r.balance.unlocked > 1e-12;
       var kiTag = S.demo || !r ? '' : r.balance.exact ? ' · <span class="tag ok">exact</span>' : r.balance.keyImages && r.balance.keyImages.missing > 0 ? ' · <span class="tag">à réimporter</span>' : ' · <span class="tag">estimé</span>';
-      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + kiTag + '</small></div><b>' + (r ? xmr(r.balance.total) + (locked ? '<span class="approx">dont ' + xmr(r.balance.unlocked) + ' disponible</span>' : '') : '<span class="small">non synchronisé</span>') + '</b></div>';
+      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · <span class="addr">' + esc(K.short(w.address)) + '</span>' + kiTag + '</small></div><b>' + (r ? xmr(r.balance.total) + (locked ? '<span class="approx">dont ' + xmr(r.balance.unlocked) + ' disponible</span>' : '') : '<span class="small">non synchronisé</span>') + '</b></div>';
     }).join('') : '<p class="empty">Aucun portefeuille pour l\u2019instant.</p>') + '</div>';
     h += '<h2>Opérations du jour <a href="#/operations">Tout voir</a></h2><div class="card">' + (today.length ? today.map(txRow).join('') : '<p class="empty">Aucune opération aujourd\u2019hui.</p>') + '</div>';
     h += '<h2>Bientôt <a href="#/bientot">Tout voir</a></h2><div class="card">' + (soon.length ? soon.map(function (s) { return subRow(s, true); }).join('') : '<p class="empty">Rien de prévu dans les 14 prochains jours.</p>') + '</div>';
@@ -357,9 +357,12 @@
   views.reglages = function () {
     var p = S.settings;
     var h = header() + '<h1 class="title">Réglages</h1>';
+    var ui = self.PxTheme ? PxTheme.get() : 'classique';
+    h += '<h2>Apparence</h2><div class="card"><div class="row"><div class="t"><div>Thème</div><small>« matrix » : police monospace et pluie de code orange en fond. « classique » : l\u2019interface d\u2019origine.</small></div></div>' +
+      '<div class="opts" role="radiogroup" aria-label="Apparence">' + ['matrix', 'classique'].map(function (t) { return '<button class="opt' + (ui === t ? ' on' : '') + '" role="radio" aria-checked="' + (ui === t) + '" data-ui="' + t + '">' + t + '</button>'; }).join('') + '</div></div>';
     h += '<h2>Mode</h2><div class="card"><div class="row"><div class="t"><div>Mode démo</div><small>Données fictives, aucune connexion</small></div><button class="pill' + (S.demo ? ' on' : '') + '" data-act="' + (S.demo ? 'quit-demo' : 'demo') + '">' + (S.demo ? 'Activé' : 'Désactivé') + '</button></div></div>';
     if (!S.demo && V.isOpen()) {
-      h += '<h2>Portefeuilles</h2><div class="card">' + (S.wallets.map(function (w) { return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small class="mono">' + esc(K.short(w.address)) + ' · view key chiffrée</small></div><button class="lockbtn" data-del-w="' + esc(w.id) + '" aria-label="Retirer">✕</button></div>'; }).join('') || '<p class="empty">Aucun.</p>') + '</div><a class="btn ghost mt" href="#/ajouter">Ajouter un portefeuille</a>';
+      h += '<h2>Portefeuilles</h2><div class="card">' + (S.wallets.map(function (w) { return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small><span class="addr mono">' + esc(K.short(w.address)) + '</span> · view key chiffrée</small></div><button class="lockbtn" data-del-w="' + esc(w.id) + '" aria-label="Retirer">✕</button></div>'; }).join('') || '<p class="empty">Aucun.</p>') + '</div><a class="btn ghost mt" href="#/ajouter">Ajouter un portefeuille</a>';
       var custom = p.node && p.node !== 'auto' && Sync.NODES.indexOf(p.node) < 0;
       h += '<h2>Synchronisation</h2><form id="setf" class="card"><div class="f mt"><label for="pv">Source</label><select id="pv">' + Object.keys(Sync.providers).filter(function (k) { return k !== 'demo'; }).map(function (k) { return '<option value="' + k + '"' + (p.provider === k ? ' selected' : '') + '>' + esc(Sync.providers[k].label) + '</option>'; }).join('') + '</select><div class="msg">' + esc(Sync.get(p.provider).description) + '</div></div>';
       if (p.provider !== 'lws') {
@@ -560,7 +563,8 @@
     m.textContent = S.nodeTest;
   }
   document.addEventListener('click', async function (e) {
-    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del]'); if (!t) return;
+    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del],button[data-ui]'); if (!t) return;
+    if (t.dataset.ui && t.tagName === 'BUTTON') { if (self.PxTheme) PxTheme.set(t.dataset.ui); toast(t.dataset.ui === 'matrix' ? 'Apparence « matrix » activée.' : 'Apparence « classique » activée.'); skipScroll = true; var y1 = window.scrollY; render(); window.scrollTo(0, y1); return; }
     if (t.dataset.kitab) { S.kiTab = t.dataset.kitab; skipScroll = true; var y0 = window.scrollY; render(); window.scrollTo(0, y0); return; }
     if (t.dataset.kiOut) {
       if (S.sync) return toast('Attendez la fin de la synchronisation en cours.');

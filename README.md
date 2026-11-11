@@ -42,6 +42,14 @@ Ce que voit le nœud : votre adresse IP, l'heure de synchro et les plages de blo
 - Wake Lock (écran allumé) quand le navigateur le permet. Un message demande de garder l'app ouverte.
 - Nœud qui tombe en cours de synchro (mode Automatique) : bascule sur le nœud suivant sans perdre la progression, 4 fois au maximum. Un nœud bloqué plus de 2 min est traité comme tombé.
 
+## Apparence
+
+Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et « classique ».
+- « matrix » s'inspire de l'écran de réglages de Bitchat : police monospace (`ui-monospace`, donc SF Mono sur iPhone et Mac, sans fichier de police à charger), tout en minuscules sauf les titres de section et les badges, cartes teintées à bord fin et coins de 12 px, et badges à bord orange. Le fond est noir `#0A0A0A` avec l'orange Monero `#FF6600`.
+- Une pluie de caractères orange défile en fond (`js/theme.js`) : opacité 16 %, environ 14 images/s, arrêtée en arrière-plan. Elle reste fixe si le système demande de réduire les animations.
+- Le choix est gardé dans `localStorage` (`px-ui`) et appliqué avant le premier affichage. Il ne contient aucune donnée sensible.
+- Les adresses, les commandes, les saisies et le montant principal gardent leur casse d'origine.
+
 ## Solde exact (key images)
 
 Écran `#/exact`. Les key images sont lues et déchiffrées dans le navigateur, gardées chiffrées dans le coffre, puis appliquées avec `importKeyImages` de monero-ts après la synchro.
@@ -57,6 +65,7 @@ Ce que voit le nœud : votre adresse IP, l'heure de synchro et les plages de blo
 - `node tests/keyimages.test.js` : vrai fichier CLI d'un portefeuille jetable, fichier synthétique, JSON, erreurs, fusion.
 - `python3 tests/e2e.py`
 - `python3 tests/e2e-sync.py`
+- `python3 tests/e2e-theme.py` : apparences « matrix » et « classique », persistance du choix, captures 31 à 41.
 - `python3 tests/e2e-ios.py [blocs]` : iPhone 390×844, pause et reprise, bascule de nœud, export des sorties, refus de fausses key images, puis « Solde exact » avec le vrai fichier CLI.
 
 ## Limites (à lire)

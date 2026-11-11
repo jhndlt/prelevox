@@ -127,3 +127,102 @@ details.adv{margin:-4px 2px 14px}details.adv summary{color:var(--o);font-size:13
 .kicard .btn.ghost{background:var(--c2)}label.btn{margin:0;color:#140800;font-size:16px}label.btn.off{opacity:.45;pointer-events:none}
 .linkbtn{background:none;border:0;color:var(--l);font-size:13px;font-weight:600;padding:6px;cursor:pointer;text-decoration:underline}
 .seg button{font-size:13.5px}
+
+/* --- Apparence (réglage) --- */
+.opts{display:flex;gap:8px;padding:2px 0 14px}
+.opt{flex:1;border:1.5px solid var(--line);background:var(--c2);color:var(--l);border-radius:999px;padding:10px 12px;font-weight:650;font-size:14px;cursor:pointer}
+.opt.on{border-color:var(--o);background:rgba(255,102,0,.16);color:var(--o)}
+
+/* ===================== Apparence « matrix » (par défaut) =====================
+   Inspirée des écrans terminal de Bitchat : monospace (SF Mono sur iPhone/Mac), minuscules,
+   cartes teintées à bord fin, badges en capitales. Noir #0A0A0A, orange Monero #FF6600. */
+html[data-ui="matrix"]{
+  --bg:#0A0A0A;--c:rgba(255,102,0,.055);--c2:rgba(255,102,0,.11);--line:rgba(255,102,0,.16);--l:rgba(255,160,100,.66);--ink:#FF8A3D;--in:#FFB070;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace;--font:var(--mono)}
+html[data-ui="matrix"],html[data-ui="matrix"] body{background:#0A0A0A;color:var(--ink);font-family:var(--mono);font-size:14px;letter-spacing:-.01em}
+html[data-ui="matrix"] .rain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.16}
+html[data-ui="matrix"] .app,html[data-ui="matrix"] .tabbar,html[data-ui="matrix"] .toast{position:relative;z-index:1}
+html[data-ui="matrix"] .tabbar,html[data-ui="matrix"] .toast{position:fixed}
+html[data-ui="matrix"] .app{text-transform:lowercase}
+/* ce qui garde sa casse : saisies, adresses, commandes, unités, capitales voulues */
+html[data-ui="matrix"] :is(input,textarea,select,.addr,.mono,.kbd,.hero h1,code){text-transform:none}
+html[data-ui="matrix"] :is(input,textarea,select){font-family:var(--mono);background:rgba(255,102,0,.04);border:1px solid var(--line);border-radius:12px;color:#FFB070}
+html[data-ui="matrix"] :is(input,textarea,select):focus{border-color:var(--o);box-shadow:0 0 0 3px rgba(255,102,0,.15)}
+html[data-ui="matrix"] ::placeholder{color:rgba(255,140,70,.38)}
+html[data-ui="matrix"] label{color:#FF8A3D}
+html[data-ui="matrix"] a{color:var(--o)}
+/* en-tête */
+html[data-ui="matrix"] .brand{font-family:var(--mono);font-size:20px;color:#FF8A3D;letter-spacing:-.04em}
+html[data-ui="matrix"] .brand span{color:var(--o)}
+html[data-ui="matrix"] .badge,html[data-ui="matrix"] .tag{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;background:rgba(255,102,0,.13);border:1px solid rgba(255,102,0,.55);color:var(--o);border-radius:999px}
+html[data-ui="matrix"] .tag{padding:0 7px;font-size:10px}
+html[data-ui="matrix"] .tag:not(.ok){background:transparent;border-color:rgba(255,102,0,.3);color:var(--l)}
+html[data-ui="matrix"] .demobar{background:rgba(255,102,0,.05);border:1px dashed rgba(255,102,0,.4);border-radius:12px}
+html[data-ui="matrix"] .lockbtn{color:var(--o)}
+/* titres de section : capitales grasses */
+html[data-ui="matrix"] h2{font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--o);font-weight:800;font-size:12.5px}
+html[data-ui="matrix"] h2 a{text-transform:lowercase;font-weight:600}
+html[data-ui="matrix"] .title{font-family:var(--mono);color:var(--o);font-size:24px;letter-spacing:-.04em;font-weight:800}
+html[data-ui="matrix"] .sub,html[data-ui="matrix"] .note{color:var(--l)}
+html[data-ui="matrix"] .note strong{color:#FF8A3D}
+/* cartes : teinte orange, bord fin, coins 12 px */
+html[data-ui="matrix"] :is(.card,.kpi,.chart-card,.synccard,.pts,.steps,.alert.info,.seg){background:rgba(255,102,0,.055);border:1px solid rgba(255,102,0,.18);border-radius:12px}
+html[data-ui="matrix"] .card{padding:2px 14px}
+html[data-ui="matrix"] .row{border-bottom:1px solid rgba(255,102,0,.12)}
+html[data-ui="matrix"] .row .t>div{font-weight:800;color:#FF8A3D}
+html[data-ui="matrix"] .row small{color:var(--l);font-size:12px;line-height:1.5}
+html[data-ui="matrix"] .row b{color:#FFB070;font-weight:700}
+html[data-ui="matrix"] .ic{border-radius:10px;background:rgba(255,102,0,.1);color:var(--o);border:1px solid rgba(255,102,0,.25)}
+html[data-ui="matrix"] .ic.c1{opacity:.75}html[data-ui="matrix"] .ic.c2{opacity:.55}
+html[data-ui="matrix"] .kpi small{color:var(--l)}html[data-ui="matrix"] .kpi b{color:#FFB070}
+/* carte du solde : terminal, chiffre lumineux */
+html[data-ui="matrix"] .hero{background:rgba(255,102,0,.07);border:1px solid rgba(255,102,0,.45);border-radius:12px;box-shadow:0 0 0 1px rgba(255,102,0,.08),0 0 32px rgba(255,102,0,.10) inset}
+html[data-ui="matrix"] .hero::after{display:none}
+html[data-ui="matrix"] .hero small{color:var(--l);opacity:1}
+html[data-ui="matrix"] .hero h1{color:var(--o);font-family:var(--mono);letter-spacing:-.05em;font-size:34px;text-shadow:0 0 18px rgba(255,102,0,.45)}
+html[data-ui="matrix"] .hero h1 em{color:#FF8A3D;opacity:1}
+html[data-ui="matrix"] .hero p{color:#FF8A3D;opacity:1}
+html[data-ui="matrix"] .hero h1::before{content:"> ";color:rgba(255,102,0,.5);font-size:.6em;vertical-align:.25em}
+html[data-ui="matrix"] .chips span{background:transparent;border:1px solid rgba(255,102,0,.35);color:#FF8A3D;border-radius:999px}
+/* boutons et pastilles : badges « ACTIVÉ » teintés à bord orange */
+html[data-ui="matrix"] .btn{font-family:var(--mono);border-radius:12px;background:var(--o);color:#0A0A0A;font-weight:800;letter-spacing:-.01em;box-shadow:0 0 18px rgba(255,102,0,.25)}
+html[data-ui="matrix"] .btn.ghost{background:transparent;color:var(--o);border:1px solid rgba(255,102,0,.5);box-shadow:none}
+html[data-ui="matrix"] .btn.danger{background:transparent;border:1px solid rgba(255,77,79,.6);color:#ff8a8a;box-shadow:none}
+html[data-ui="matrix"] .card .btn.ghost,html[data-ui="matrix"] .kicard .btn.ghost{background:transparent}
+html[data-ui="matrix"] .pill{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:800;border-radius:999px;padding:6px 11px;background:transparent;border:1px solid rgba(255,102,0,.3);color:var(--l)}
+html[data-ui="matrix"] .pill.on{background:rgba(255,102,0,.15);border-color:var(--o);color:var(--o)}
+html[data-ui="matrix"] .opt{font-family:var(--mono);border:1px solid rgba(255,102,0,.25);background:transparent;color:var(--l);border-radius:999px}
+html[data-ui="matrix"] .opt.on{background:rgba(255,102,0,.16);border-color:var(--o);color:var(--o)}
+html[data-ui="matrix"] .seg{padding:4px;border-radius:999px}
+html[data-ui="matrix"] .seg button{font-family:var(--mono);border-radius:999px;color:var(--l)}
+html[data-ui="matrix"] .seg button.on{background:rgba(255,102,0,.16);color:var(--o);box-shadow:inset 0 0 0 1px rgba(255,102,0,.6)}
+html[data-ui="matrix"] .chart-periods button{font-family:var(--mono);background:transparent;border:1px solid rgba(255,102,0,.22)}
+html[data-ui="matrix"] .chart-periods button.on{background:rgba(255,102,0,.15);border-color:var(--o)}
+html[data-ui="matrix"] .chart-delta.up{color:#FFB070}
+html[data-ui="matrix"] .chart-tip{background:#120a04;border-color:rgba(255,102,0,.5);border-radius:10px}
+html[data-ui="matrix"] .chart-tip b{color:var(--o)}
+/* alertes */
+html[data-ui="matrix"] .alert{border-radius:12px}
+html[data-ui="matrix"] .alert.info b,html[data-ui="matrix"] .alert.ok b{color:#FF8A3D}
+html[data-ui="matrix"] .alert.ok{background:rgba(255,176,112,.06);border:1px solid rgba(255,176,112,.35);color:#FFB070}
+html[data-ui="matrix"] .alert.warn{background:rgba(255,176,32,.06);border-color:rgba(255,176,32,.4)}
+html[data-ui="matrix"] .synccard{border-color:rgba(255,102,0,.4)}
+html[data-ui="matrix"] .sync-line{color:#FFB070}
+html[data-ui="matrix"] .sync-hint b{color:#FF8A3D}
+html[data-ui="matrix"] .bar{background:rgba(255,102,0,.1);border-radius:2px;height:6px}
+html[data-ui="matrix"] .bar i{border-radius:2px;box-shadow:0 0 10px rgba(255,102,0,.7)}
+html[data-ui="matrix"] .steps li{color:#FF8A3D;border-color:rgba(255,102,0,.12)}
+html[data-ui="matrix"] .steps b{color:var(--o)}
+html[data-ui="matrix"] .steps li::before{border-radius:8px;border:1px solid rgba(255,102,0,.5);background:rgba(255,102,0,.1)}
+html[data-ui="matrix"] .kbd{background:rgba(255,102,0,.1);border-color:rgba(255,102,0,.35);color:#FFB070}
+html[data-ui="matrix"] .welcome h1{font-family:var(--mono);color:#FF8A3D;letter-spacing:-.05em}
+html[data-ui="matrix"] .quote{color:#FF8A3D}
+html[data-ui="matrix"] .pts div{color:#FF8A3D;border-color:rgba(255,102,0,.12)}
+html[data-ui="matrix"] .empty{color:var(--l)}
+/* barre d'onglets */
+html[data-ui="matrix"] .tabbar{background:rgba(10,10,10,.92);border-top:1px solid rgba(255,102,0,.25)}
+html[data-ui="matrix"] .tabbar a{font-family:var(--mono);text-transform:lowercase;color:rgba(255,140,70,.5)}
+html[data-ui="matrix"] .tabbar a.on{color:var(--o);text-shadow:0 0 10px rgba(255,102,0,.6)}
+html[data-ui="matrix"] .toast{background:#140b05;border:1px solid rgba(255,102,0,.5);color:#FF8A3D;font-family:var(--mono);text-transform:lowercase}
+@media (prefers-reduced-motion:reduce){html[data-ui="matrix"] .rain{opacity:.08}}
+html[data-ui="matrix"] button:not(.pill):not(.badge){text-transform:inherit;font-family:var(--mono)}
