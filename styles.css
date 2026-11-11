@@ -112,3 +112,18 @@ details.adv{margin:-4px 2px 14px}details.adv summary{color:var(--o);font-size:13
 .chart-head .chart-since{display:block;font-size:11.5px;color:var(--l);margin-top:2px;font-weight:500;text-transform:none;letter-spacing:0}
 .card .btn.ghost{background:var(--c2)}
 .card .alert.info{background:var(--c2);margin:12px 0 14px}
+
+/* --- Solde exact (key images) & synchro iOS --- */
+.alert.ok{background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.28);color:#c9f5d8}.alert.ok b{color:#fff}.alert a{font-weight:600}
+.tag{display:inline-block;font-size:10.5px;font-weight:650;letter-spacing:.02em;padding:1px 7px;border-radius:8px;background:var(--c2);color:var(--l)}
+.tag.ok{background:rgba(74,222,128,.14);color:var(--in)}
+.sync-hint b{color:#e9e9ec;font-weight:600}.sync-warn{color:var(--warn)}
+.steps{list-style:none;counter-reset:st;background:var(--c);border-radius:18px;padding:4px 14px;margin:12px 0}
+.steps li{counter-increment:st;position:relative;padding:12px 0 12px 40px;border-bottom:1px solid var(--line);font-size:14px;line-height:1.5;color:#d6d7db}.steps li:last-child{border:0}
+.steps li::before{content:counter(st);position:absolute;left:0;top:11px;width:26px;height:26px;border-radius:50%;background:rgba(255,102,0,.16);color:var(--o);font-weight:700;font-size:13px;display:grid;place-items:center}
+.steps b{color:#fff}
+.kbd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--c2);border:1px solid #303136;border-radius:7px;padding:1px 6px;color:#fff;white-space:nowrap}
+.kicard{margin-bottom:10px;padding-bottom:14px}.kiacts{display:flex;flex-direction:column;gap:8px}.kiacts .btn+.btn{margin-top:0}
+.kicard .btn.ghost{background:var(--c2)}label.btn{margin:0;color:#140800;font-size:16px}label.btn.off{opacity:.45;pointer-events:none}
+.linkbtn{background:none;border:0;color:var(--l);font-size:13px;font-weight:600;padding:6px;cursor:pointer;text-decoration:underline}
+.seg button{font-size:13.5px}

@@ -1,13 +1,13 @@
 /* Prelevox – application. Lecture seule : aucune fonction d'envoi n'existe dans ce code. */
 (function () {
   'use strict';
-  var K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync, Chart = self.PxChart;
+  var K = self.PxKeys, V = self.PxVault, Demo = self.PxDemo, Sync = self.PxSync, Chart = self.PxChart, KI = self.PxKeyImages;
   var $app = document.getElementById('app'), $tab = document.getElementById('tabbar'), $toast = document.getElementById('toast');
   var DAY = 864e5;
   var KEY_MSG = 'Ce n\u2019est pas un portefeuille, c\u2019est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface.';
   var S = { demo: false, vaultExists: false, wallets: [], results: {}, subs: [], chartPeriod: 30,
     settings: { provider: 'monero-ts', node: 'auto', customNode: '', lwsUrl: '', price: true },
-    sync: null, errors: {}, price: null, nodeTest: null };
+    sync: null, errors: {}, price: null, nodeTest: null, kis: {}, resume: null, wake: null };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function xmr(n, sign) { var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }); return sign ? (n === 0 ? '' : n > 0 ? '+' : '\u2212') + s : (n < 0 ? '\u2212' : '') + s; }
@@ -39,6 +39,9 @@
   function unlockedTotal() { return wallets().reduce(function (a, w) { var r = S.results[w.id]; return a + (r ? (r.balance.unlocked != null ? r.balance.unlocked : r.balance.total) : 0); }, 0); }
   function wname(id) { var w = wallets().find(function (x) { return x.id === id; }); return w ? w.label : ''; }
   function widx(id) { return Math.max(0, wallets().findIndex(function (x) { return x.id === id; })) % 3; }
+  function isExact(id) { var r = S.results[id]; return !!(r && r.balance && r.balance.exact); }
+  function allExact() { var ws = wallets().filter(function (w) { return S.results[w.id]; }); return !S.demo && ws.length > 0 && ws.every(function (w) { return isExact(w.id); }); }
+  function dmyY(ts) { return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }); }
   function total() { return wallets().reduce(function (a, w) { var r = S.results[w.id]; return a + (r ? r.balance.total : 0); }, 0); }
   /* Historique du solde total pour le graphique d'accueil */
   function historyPoints() {
@@ -67,6 +70,7 @@
       if (!w.restoreHeight && !w.restoreSource) { w.restoreHeight = Sync.restoreHeightForDate((w.added || Date.now()) - 30 * DAY); w.restoreSource = 'default'; var id = w.id; delete w.id; await V.save('wallet', id, w); w.id = id; }
     }
     S.subs = await V.list('sub');
+    S.kis = {}; (await V.list('ki')).forEach(function (k) { S.kis[k.id.replace(/^ki-/, '')] = { count: k.count, exportedAt: k.exportedAt, importedAt: k.importedAt, format: k.format, fileName: k.fileName }; });
     var cache = await V.list('cache'); S.results = {};
     cache.forEach(function (c) { S.results[c.id.replace(/^cache-/, '')] = c.data; });
   }
@@ -76,8 +80,10 @@
     if (S.sync) return toast('Synchronisation déjà en cours.');
     if (!V.isOpen() || !S.wallets.length) return;
     var p = Sync.get(S.settings.provider);
-    var job = S.sync = { cancelled: false, handle: null, walletId: null, label: '', pct: 0, remaining: null, preparing: true, node: '', started: Date.now(), rate: null, samples: [] };
-    paintSync(); 
+    var job = S.sync = { cancelled: false, paused: false, handle: null, walletId: null, label: '', pct: 0, remaining: null, preparing: true, node: '', started: Date.now(), rate: null, samples: [], onlyId: onlyId };
+    S.resume = null;
+    wakeLock(true);
+    paintSync();
     var list = S.wallets.filter(function (w) { return !onlyId || w.id === onlyId; });
     var okCount = 0;
     for (var i = 0; i < list.length && !job.cancelled; i++) {
@@ -86,13 +92,19 @@
       paintSync();
       try {
         var state = p.id === 'monero-ts' ? await V.load('wstate', 'st-' + w.id) : null;
+        var kis = p.id === 'monero-ts' ? await V.load('ki', 'ki-' + w.id) : null;
         var out = await p.sync(w, S.settings, {
-          state: state,
+          state: state, keyImages: kis,
           isCancelled: function () { return job.cancelled; },
-          onHandle: function (h) { job.handle = h; },
-          onNode: function (u) { job.node = u; paintSync(); },
+          onHandle: function (h) { job.handle = h; if (job.paused) h.pause(); },
+          onNode: function (u, o) {
+            if (o && o.failover && job.node) { job.failover = 'Le nœud ' + hostOf(job.node) + ' ne répond plus : bascule sur ' + hostOf(u) + ', sans perte.'; toast(job.failover); }
+            job.node = u; paintSync();
+          },
           onProgress: function (info) {
             V.touch(); // le coffre reste ouvert pendant une synchro active
+            if (info.keyImages) { job.ki = true; return paintSync(); }
+            job.ki = false;
             job.pct = info.pct; job.remaining = info.remaining; job.preparing = info.preparing; job.end = info.end;
             var now = Date.now(); job.samples.push([now, info.height]); while (job.samples.length > 2 && now - job.samples[0][0] > 30000) job.samples.shift();
             var a = job.samples[0], b = job.samples[job.samples.length - 1];
@@ -105,11 +117,14 @@
         await V.save('cache', 'cache-' + w.id, { data: out.result });
       } catch (e) {
         if (e && e.cancelled) { job.cancelled = true; break; }
+        if (e && e.paused) { job.paused = true; break; }
         S.errors[w.id] = (e && e.message) || String(e);
         if (!V.isOpen()) break;
       }
     }
-    S.sync = null;
+    kis = null;
+    S.sync = null; wakeLock(false);
+    if (job.paused) { S.resume = { onlyId: onlyId, at: Date.now() }; paintSync(); if (document.visibilityState === 'visible') resumeSync(); return; }
     if (job.cancelled) toast('Synchronisation annulée. La progression est conservée.');
     else if (okCount === list.length) toast(okCount > 1 ? 'Portefeuilles synchronisés.' : 'Portefeuille synchronisé.');
     if (V.isOpen()) render();
@@ -119,18 +134,43 @@
     j.cancelled = true; if (j.handle) j.handle.stop();
     paintSync();
   }
+  /* Écran allumé pendant la synchro (Wake Lock, si le navigateur le permet : Safari iOS 16.4+, Chrome). */
+  async function wakeLock(on) {
+    try {
+      if (on && !S.wake && navigator.wakeLock && document.visibilityState === 'visible') {
+        S.wake = await navigator.wakeLock.request('screen');
+        S.wake.addEventListener('release', function () { S.wake = null; if (S.sync) paintSync(); });
+        if (S.sync) paintSync();
+      } else if (!on && S.wake) { var w = S.wake; S.wake = null; await w.release(); }
+    } catch (e) { S.wake = null; }
+  }
+  /* App en arrière-plan (iOS suspend la page) : pause propre, progression chiffrée sauvegardée. */
+  function pauseSync() {
+    var j = S.sync; if (!j || j.cancelled || j.paused) return;
+    j.paused = true; if (j.handle && j.handle.pause) j.handle.pause();
+  }
+  function resumeSync() {
+    if (!S.resume || S.sync || S.demo || !V.isOpen() || document.visibilityState !== 'visible') return;
+    var r = S.resume; S.resume = null;
+    toast('Reprise de la synchronisation là où elle s\u2019était arrêtée.');
+    syncAll(r.onlyId);
+  }
   function syncHtml() {
     var j = S.sync; if (!j) return '';
     var pct = Math.round((j.pct || 0) * 1000) / 10;
     var eta = j.rate && j.remaining ? dur(j.remaining / j.rate) : '';
     var line = j.cancelled ? 'Arrêt en cours, sauvegarde de la progression…' :
+      j.paused ? 'En pause : sauvegarde de la progression…' :
+      j.ki ? 'Vérification des key images importées…' :
       !j.node ? 'Recherche d\u2019un nœud disponible…' :
       j.preparing ? 'Préparation · téléchargement des repères de la chaîne…' :
       pct.toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' % · ' + (j.remaining != null ? nf(j.remaining) + ' bloc' + (j.remaining > 1 ? 's' : '') + ' restant' + (j.remaining > 1 ? 's' : '') : '') + (eta ? ' · ' + eta : '');
     return '<div class="synccard" id="syncbox" role="status" aria-live="polite"><div class="sync-head"><span class="spin" aria-hidden="true"></span><div class="t"><b>Synchronisation' + (S.wallets.length > 1 ? ' ' + esc(j.step || '') : '') + '</b><small>' + esc(j.label) + (j.node ? ' · nœud ' + esc(hostOf(j.node)) : '') + '</small></div>' +
       (j.cancelled ? '' : '<button class="pill" data-act="cancel-sync">Annuler</button>') + '</div>' +
       '<div class="bar"><i data-w="' + (j.preparing ? 2 : Math.max(2, pct)) + '"></i></div><small class="sync-line">' + line + '</small>' +
-      '<small class="sync-hint">Gardez l\u2019app ouverte : la progression est enregistrée (chiffrée) chaque minute.</small></div>';
+      (j.failover ? '<small class="sync-hint sync-warn">' + esc(j.failover) + '</small>' : '') +
+      '<small class="sync-hint">' + (Sync.isIOS() ? '📱 <b>Gardez Prelevox ouvert et l\u2019écran allumé.</b> Sur iPhone, la synchronisation se met en pause dès que vous changez d\u2019app ; elle reprend toute seule au retour, sans rien perdre.'
+        : 'Gardez l\u2019app ouverte : la progression est enregistrée (chiffrée) toutes les minutes.') + (S.wake ? ' · Écran maintenu allumé.' : '') + '</small></div>';
   }
   function paintSync() {
     var box = document.getElementById('syncbox'), html = syncHtml();
@@ -138,6 +178,8 @@
       var tmp = document.createElement('div'); tmp.innerHTML = html; var nb = tmp.firstChild;
       box.querySelector('.sync-head').innerHTML = nb.querySelector('.sync-head').innerHTML;
       box.querySelector('.sync-line').textContent = nb.querySelector('.sync-line').textContent;
+      var hints = box.querySelectorAll('.sync-hint'), nh = nb.querySelectorAll('.sync-hint');
+      if (hints.length !== nh.length || hints[hints.length - 1].innerHTML !== nh[nh.length - 1].innerHTML) { box.innerHTML = nb.innerHTML; }
       box.querySelector('.bar i').dataset.w = nb.querySelector('.bar i').dataset.w;
     } else if (box) box.remove();
     else { var slot = document.getElementById('syncslot'); if (slot) slot.innerHTML = html; }
@@ -193,23 +235,32 @@
     var sub = S.demo ? '≈ ' + eur(t * Demo.priceEur) + ' (exemple)' :
       !synced ? 'Pas encore synchronisé' :
       (S.settings.price && S.price ? '≈ ' + eur(t * S.price.eur) + ' · ' : '') + 'Synchro ' + (sameDay(lastSync, Date.now()) ? 'à ' + hm(lastSync) : 'le ' + dmy(lastSync));
-    var h = header() + '<div class="hero"><small>Solde total' + (S.demo ? '' : ' estimé') + ' · ' + ws.length + ' portefeuille' + (ws.length > 1 ? 's' : '') + ' (lecture seule)</small><h1>' + (synced ? xmr(t) : '—') + ' <em>XMR</em></h1>' +
+    var exact = allExact();
+    var h = header() + '<div class="hero"><small>' + (S.demo ? 'Solde total' : exact ? 'Solde exact (au ' + dmy(lastSync) + ')' : 'Solde total estimé') + ' · ' + ws.length + ' portefeuille' + (ws.length > 1 ? 's' : '') + ' (lecture seule)</small><h1>' + (synced ? xmr(t) : '—') + ' <em>XMR</em></h1>' +
       '<p>' + sub + '</p>' +
-      '<div class="chips"><span>👁 View keys</span><span>🔒 Chiffré localement</span><span>⛔ Aucun envoi</span></div></div>';
+      '<div class="chips">' + (exact ? '<span>✓ Key images à jour</span>' : '<span>👁 View keys</span>') + '<span>🔒 Chiffré localement</span><span>⛔ Aucun envoi</span></div></div>';
     if (!S.demo) h += '<div id="syncslot">' + syncHtml() + '</div>';
     if (!S.demo) ws.forEach(function (w) { if (S.errors[w.id] && !S.sync) h += '<div class="alert stop"><b>' + esc(w.label) + '</b> : ' + esc(S.errors[w.id]) + '<div class="alert-acts"><button class="pill on" data-act="sync">Réessayer</button><a class="pill" href="#/reglages">Choisir un nœud</a></div></div>'; });
+    if (!S.demo && !S.sync) ws.forEach(function (w) {
+      var r = S.results[w.id], k = r && r.balance.keyImages;
+      if (k && k.error) h += '<div class="alert stop"><b>' + esc(w.label) + ' · key images</b> : ' + esc(k.error) + '<div class="alert-acts"><a class="pill on" href="#/exact">Réimporter</a></div></div>';
+      else if (k && k.applied && k.missing > 0) h += '<div class="alert warn"><b>' + esc(w.label) + '</b> : ' + k.missing + ' réception' + (k.missing > 1 ? 's' : '') + ' depuis votre dernier export de key images. Le solde redevient estimé : <a href="#/exact">réimportez un fichier récent</a> pour le rendre exact.</div>';
+    });
     if (!S.demo && ws.length && !synced && !S.sync && !Object.keys(S.errors).length) h += '<div class="alert info"><b>Première synchronisation</b><br>Prelevox va lire les blocs Monero depuis la date de création de votre portefeuille, directement sur cet appareil. Cela peut prendre quelques minutes.<button class="btn mt" data-act="sync">Lancer la synchronisation</button></div>';
     h += Chart.cardHtml(historyPoints(), S.chartPeriod, S.demo ? undefined : 'Le graphique apparaîtra après la première synchronisation.', S.demo ? undefined : { noExtend: true });
     h += '<h2>Soldes <a href="#/ajouter">+ Ajouter</a></h2><div class="card">' + (ws.length ? ws.map(function (w, i) {
       var r = S.results[w.id];
       var locked = r && !S.demo && r.balance.unlocked != null && r.balance.total - r.balance.unlocked > 1e-12;
-      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + '</small></div><b>' + (r ? xmr(r.balance.total) + (locked ? '<span class="approx">dont ' + xmr(r.balance.unlocked) + ' disponible</span>' : '') : '<span class="small">non synchronisé</span>') + '</b></div>';
+      var kiTag = S.demo || !r ? '' : r.balance.exact ? ' · <span class="tag ok">exact</span>' : r.balance.keyImages && r.balance.keyImages.missing > 0 ? ' · <span class="tag">à réimporter</span>' : ' · <span class="tag">estimé</span>';
+      return '<div class="row"><span class="ic c' + (i % 3) + '"><span class="dot"></span></span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(w.app || 'Monero') + ' · ' + esc(K.short(w.address)) + kiTag + '</small></div><b>' + (r ? xmr(r.balance.total) + (locked ? '<span class="approx">dont ' + xmr(r.balance.unlocked) + ' disponible</span>' : '') : '<span class="small">non synchronisé</span>') + '</b></div>';
     }).join('') : '<p class="empty">Aucun portefeuille pour l\u2019instant.</p>') + '</div>';
     h += '<h2>Opérations du jour <a href="#/operations">Tout voir</a></h2><div class="card">' + (today.length ? today.map(txRow).join('') : '<p class="empty">Aucune opération aujourd\u2019hui.</p>') + '</div>';
     h += '<h2>Bientôt <a href="#/bientot">Tout voir</a></h2><div class="card">' + (soon.length ? soon.map(function (s) { return subRow(s, true); }).join('') : '<p class="empty">Rien de prévu dans les 14 prochains jours.</p>') + '</div>';
     if (!S.demo) {
       h += '<button class="btn ghost mt" data-act="sync"' + (S.sync ? ' disabled' : '') + '>Synchroniser</button>';
-      h += '<details class="alert info"><summary><b>Pourquoi « estimé » ?</b></summary>Avec une clé de visualisation, Monero montre avec certitude tout ce que vous <b>recevez</b>. Les <b>dépenses</b>, elles, ne sont visibles qu\u2019avec la clé de dépense, que Prelevox refuse. Si vous avez envoyé des fonds depuis ce portefeuille, le solde réel peut donc être plus bas que celui affiché.' +
+      if (exact) h += '<div class="alert ok"><b>Solde exact</b><br>Vos key images ont permis de repérer chaque sortie dépensée. Prelevox suit aussi les dépenses à venir de ces fonds. Après de nouvelles réceptions, <a href="#/exact">réimportez un fichier</a> pour rester exact.</div>';
+      else h += '<a class="btn ghost mt" href="#/exact">Obtenir un solde exact (key images)</a>';
+      if (!exact) h += '<details class="alert info"><summary><b>Pourquoi « estimé » ?</b></summary>Avec une clé de visualisation, Monero montre avec certitude tout ce que vous <b>recevez</b>. Les <b>dépenses</b>, elles, ne sont visibles qu\u2019avec la clé de dépense, que Prelevox refuse. Si vous avez envoyé des fonds depuis ce portefeuille, le solde réel peut donc être plus bas que celui affiché. Pour un solde exact, importez vos <a href="#/exact">key images</a>.' +
         (synced ? '<br><br>Données lues depuis le bloc ' + ws.map(function (w) { var r = S.results[w.id]; return r && r.balance.restoreHeight != null ? nf(r.balance.restoreHeight) + ' (≈ ' + dmy(Sync.dateFromHeight(r.balance.restoreHeight)) + ' ' + new Date(Sync.dateFromHeight(r.balance.restoreHeight)).getFullYear() + ')' : null; }).filter(Boolean).join(', ') + ' : les opérations plus anciennes ne sont pas comptées.' : '') + '</details>';
     }
     return h + note();
@@ -219,11 +270,12 @@
     var inn = today.filter(function (t) { return t.amount > 0; }).reduce(function (a, t) { return a + t.amount; }, 0);
     var out = today.filter(function (t) { return t.amount < 0; }).reduce(function (a, t) { return a + t.amount; }, 0);
     var h = header() + '<h1 class="title">Opérations du jour</h1><p class="sub">' + new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) + '</p>' +
-      '<div class="kpis"><div class="kpi"><small>Entrées</small><b class="in">' + xmr(inn, true) + '</b></div><div class="kpi"><small>Sorties estimées</small><b>' + xmr(out, true) + '</b></div></div>' +
+      '<div class="kpis"><div class="kpi"><small>Entrées</small><b class="in">' + xmr(inn, true) + '</b></div><div class="kpi"><small>' + (allExact() ? 'Sorties' : 'Sorties estimées') + '</small><b>' + xmr(out, true) + '</b></div></div>' +
       '<h2>Aujourd\u2019hui</h2><div class="card">' + (today.length ? today.map(txRow).join('') : '<p class="empty">Aucune opération aujourd\u2019hui.</p>') + '</div>';
     if (!S.demo && !wallets().some(function (w) { return S.results[w.id]; })) h += '<p class="note">Les opérations apparaîtront après la première synchronisation (onglet Soldes).</p>';
     var prev = all.filter(function (x) { return !sameDay(x.ts, Date.now()) && x.ts > Date.now() - 7 * DAY; });
     if (prev.length) h += '<h2>7 derniers jours</h2><div class="card">' + prev.map(txRow).join('') + '</div>';
+    if (allExact()) return h + '<div class="alert ok"><b>Sorties exactes</b> : vos key images importées permettent de reconnaître vos dépenses.</div>';
     return h + '<div class="alert info"><b>Pourquoi « estimée » ?</b> Avec une clé de visualisation, Monero montre avec certitude ce que vous recevez. Les sorties sont déduites sans la clé de dépense : leur montant peut être approximatif' + (S.demo ? '' : ', et certaines peuvent ne pas apparaître du tout') + '.</div>';
   };
   views.bientot = function () {
@@ -247,6 +299,42 @@
       '<div class="f"><label for="sd">Prochaine échéance</label><input id="sd" type="date" required></div>' +
       '<div class="f"><label for="sw">Portefeuille</label><select id="sw">' + S.wallets.map(function (w) { return '<option value="' + esc(w.id) + '">' + esc(w.label) + '</option>'; }).join('') + '</select></div>' +
       '<button class="btn" ' + (S.wallets.length ? '' : 'disabled') + '>Enregistrer (chiffré)</button><div class="f"></div></form>';
+  };
+  /* Solde exact : import des key images (fichier Feather ou monero-wallet-cli), tout reste sur l'appareil. */
+  views.exact = function () {
+    var tab = S.kiTab || 'feather';
+    var h = '<a class="back" href="#/soldes">‹ Retour</a><h1 class="title">Solde exact</h1>' +
+      '<p class="sub">Avec la seule view key, Prelevox voit vos réceptions mais pas vos dépenses. Vos <b>key images</b> lui permettent de reconnaître les sorties déjà dépensées.</p>' +
+      '<div class="alert ok"><b>Sans risque pour vos fonds</b><br>Une key image ne permet <b>aucun envoi</b>. Le fichier est lu et déchiffré sur cet appareil, puis gardé chiffré dans votre coffre (AES-256).</div>' +
+      '<div class="seg" role="tablist"><button class="' + (tab === 'feather' ? 'on' : '') + '" data-kitab="feather">Feather Wallet</button><button class="' + (tab === 'cli' ? 'on' : '') + '" data-kitab="cli">monero-wallet-cli</button></div>';
+    if (tab === 'feather') h += '<ol class="steps">' +
+      '<li><b>Dans Prelevox</b>, touchez « Exporter mes sorties » ci-dessous et enregistrez le fichier (ex. dans Fichiers ou AirDrop vers votre ordinateur).</li>' +
+      '<li><b>Dans Feather</b>, ouvrez votre portefeuille complet puis <span class="kbd">Tools → Offline transaction signing</span>. Choisissez la méthode « File », puis importez le fichier de sorties.</li>' +
+      '<li>À l\u2019étape « Export key images », touchez <span class="kbd">Save to file</span> : Feather crée un fichier qui se termine par <span class="kbd">_keyImages</span>.</li>' +
+      '<li><b>Revenez dans Prelevox</b> et touchez « Importer les key images » pour choisir ce fichier.</li></ol>';
+    else h += '<ol class="steps">' +
+      '<li>Ouvrez votre portefeuille complet dans <span class="kbd">monero-wallet-cli</span>, synchronisé.</li>' +
+      '<li>Tapez <span class="kbd">export_key_images all prelevox_key_images</span>, puis votre mot de passe.</li>' +
+      '<li>Transférez le fichier <span class="kbd">prelevox_key_images</span> sur cet appareil et touchez « Importer les key images ».</li></ol>' +
+      '<p class="small">Gardez le mot <b>all</b> : sans lui, seules les nouvelles sorties sont exportées. La hauteur de restauration de Prelevox doit précéder votre première réception. En cas de refus, passez par la méthode Feather : elle part des sorties lues par Prelevox.</p>';
+    h += '<h2>Vos portefeuilles</h2>';
+    if (S.demo) h += '<div class="card"><p class="empty">En démo, l\u2019import est désactivé. Ajoutez un vrai portefeuille pour obtenir un solde exact.</p></div>';
+    else if (!S.wallets.length) h += '<div class="card"><p class="empty">Ajoutez d\u2019abord un portefeuille.</p></div>';
+    (S.demo ? [] : S.wallets).forEach(function (w) {
+      var r = S.results[w.id], k = S.kis[w.id], info = r && r.balance.keyImages;
+      var st = !r ? 'Pas encore synchronisé : lancez la synchronisation d\u2019abord.' :
+        info && info.error ? '⚠ ' + info.error :
+        r.balance.exact ? '✓ Solde exact au ' + dmyY(r.balance.syncedAt) + ' · ' + nf(k ? k.count : info.count) + ' key image' + ((k ? k.count : info.count) > 1 ? 's' : '') :
+        info && info.applied && info.missing > 0 ? info.missing + ' réception' + (info.missing > 1 ? 's' : '') + ' sans key image : réimportez un fichier récent.' :
+        k ? 'Fichier importé le ' + dmyY(k.importedAt) + ' : appliqué à la prochaine synchronisation.' : 'Solde estimé (aucune key image).';
+      h += '<div class="card kicard"><div class="row"><span class="ic c0">' + (r && r.balance.exact ? '✓' : '◎') + '</span><div class="t"><div>' + esc(w.label) + '</div><small>' + esc(st) + '</small></div></div>' +
+        '<div class="kiacts">' + (tab === 'feather' ? '<button class="btn ghost" data-ki-out="' + esc(w.id) + '"' + (r && !S.sync ? '' : ' disabled') + '>Exporter mes sorties</button>' : '') +
+        '<label class="btn' + (r ? '' : ' off') + '" for="kif-' + esc(w.id) + '">Importer les key images</label><input class="hidden" type="file" id="kif-' + esc(w.id) + '" data-ki-in="' + esc(w.id) + '"' + (r ? '' : ' disabled') + '>' +
+        (k ? '<button class="linkbtn" data-ki-del="' + esc(w.id) + '">Retirer les key images</button>' : '') + '</div></div>';
+    });
+    h += '<div class="alert info"><b>Confidentialité</b><br>Pour savoir quelles sorties sont dépensées, Prelevox demande au nœud si ces key images apparaissent dans la chaîne, comme le fait Feather. Le nœud peut alors relier ces key images à votre adresse IP. <b>Avec votre propre nœud, rien ne sort de chez vous.</b></div>' +
+      '<div class="alert info"><b>Et ensuite ?</b><br>Les dépenses de ces fonds seront suivies automatiquement. Après de <b>nouvelles réceptions</b>, refaites un import pour que le solde reste exact : Prelevox vous le signalera.</div>';
+    return h + note();
   };
   views.ajouter = function () {
     var needPass = !S.vaultExists;
@@ -286,6 +374,7 @@
           '<div class="alert warn">Avec cette source, la view key est transmise à <b>votre</b> serveur pour qu\u2019il scanne. Elle ne permet aucun envoi, mais révèle vos entrées.</div>';
       }
       h += '<button class="btn">Enregistrer</button><div class="f"></div></form>';
+      h += '<h2>Solde exact</h2><div class="card"><div class="row"><div class="t"><div>Key images</div><small>' + (S.wallets.filter(function (w) { return S.kis[w.id]; }).length) + ' portefeuille' + (S.wallets.length > 1 ? 's' : '') + ' sur ' + S.wallets.length + ' avec key images importées</small></div><a class="pill" href="#/exact">Gérer</a></div></div>';
       h += '<h2>Contre-valeur en euros</h2><div class="card"><div class="row"><div class="t"><div>Afficher le solde en €</div><small>Cours XMR/EUR via CoinGecko (ou Kraken). Aucune adresse ni clé n\u2019est envoyée.</small></div><button class="pill' + (p.price ? ' on' : '') + '" data-act="toggle-price">' + (p.price ? 'Activé' : 'Désactivé') + '</button></div></div>';
       h += '<h2>Données de synchronisation</h2><div class="card">' + S.wallets.map(function (w) {
         var r = S.results[w.id];
@@ -374,6 +463,7 @@
     if (r === 'abonnements') bindSub();
     if (r === 'reglages') bindSettings();
     if (r === 'soldes') bindChart();
+    if (r === 'exact') bindExact();
     applyBars();
     if (!skipScroll) window.scrollTo(0, 0);
     skipScroll = false;
@@ -386,6 +476,34 @@
       skipScroll = true;
       render();
       window.scrollTo(0, y);
+    });
+  }
+  function download(bytes, name) {
+    var url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function bindExact() {
+    document.querySelectorAll('input[data-ki-in]').forEach(function (inp) {
+      inp.addEventListener('change', async function () {
+        var f = inp.files && inp.files[0], id = inp.dataset.kiIn; inp.value = ''; if (!f) return;
+        var w = S.wallets.find(function (x) { return x.id === id; }); if (!w) return;
+        if (f.size > 20 * 1024 * 1024) return toast('Fichier trop volumineux pour des key images.');
+        toast('Lecture du fichier…');
+        try {
+          var p = K.parseAddress(w.address);
+          var parsed = await KI.parse(new Uint8Array(await f.arrayBuffer()), w.viewKey, { spend: p.publicSpend, view: p.publicView });
+          var prev = await V.load('ki', 'ki-' + id);
+          var merged = KI.merge(prev, parsed);
+          if (merged.offset > 0 && !prev) toast('Export partiel détecté : pour un résultat fiable, refaites l\u2019export avec « all ».');
+          var rec = { format: merged.format, offset: merged.offset, items: merged.items, count: merged.items.length, importedAt: Date.now(), exportedAt: f.lastModified || Date.now(), fileName: String(f.name || '').slice(0, 80) };
+          await V.save('ki', 'ki-' + id, rec);
+          S.kis[id] = { count: rec.count, importedAt: rec.importedAt, exportedAt: rec.exportedAt, format: rec.format, fileName: rec.fileName };
+          parsed = merged = rec = prev = null;
+          toast(S.kis[id].count ? nf(S.kis[id].count) + ' key image' + (S.kis[id].count > 1 ? 's' : '') + ' importée' + (S.kis[id].count > 1 ? 's' : '') + ' (chiffrées). Vérification…' : 'Fichier valide, mais il ne contient aucune key image.');
+          if (S.results[id] && S.results[id].balance) S.results[id].balance.keyImages = null;
+          location.hash = '#/soldes'; S.errors = {}; setTimeout(function () { syncAll(id); }, 50);
+        } catch (e) { toast(e.message || String(e)); }
+      });
     });
   }
   function bindUnlock() {
@@ -442,7 +560,23 @@
     m.textContent = S.nodeTest;
   }
   document.addEventListener('click', async function (e) {
-    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan]'); if (!t) return;
+    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del]'); if (!t) return;
+    if (t.dataset.kitab) { S.kiTab = t.dataset.kitab; skipScroll = true; var y0 = window.scrollY; render(); window.scrollTo(0, y0); return; }
+    if (t.dataset.kiOut) {
+      if (S.sync) return toast('Attendez la fin de la synchronisation en cours.');
+      var wo = S.wallets.find(function (x) { return x.id === t.dataset.kiOut; }); t.disabled = true; t.textContent = 'Préparation…';
+      try {
+        var ex = await Sync.exportOutputs(wo, await V.load('wstate', 'st-' + wo.id));
+        download(ex.bytes, 'prelevox_' + (wo.label || 'portefeuille').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) + '_outputs');
+        toast(nf(ex.count) + ' sortie' + (ex.count > 1 ? 's' : '') + ' exportée' + (ex.count > 1 ? 's' : '') + '. Ouvrez ce fichier dans Feather.');
+      } catch (err) { toast(err.message || String(err)); }
+      t.disabled = false; t.textContent = 'Exporter mes sorties'; return;
+    }
+    if (t.dataset.kiDel) {
+      if (S.sync) return toast('Attendez la fin de la synchronisation en cours.');
+      if (confirm('Retirer les key images de ce portefeuille ? Le solde redeviendra estimé (relecture du portefeuille).')) { var kd = t.dataset.kiDel; await V.remove('ki-' + kd); await V.remove('st-' + kd); await V.remove('cache-' + kd); delete S.kis[kd]; delete S.results[kd]; location.hash = '#/soldes'; syncAll(kd); }
+      return;
+    }
     if (t.dataset.rescan) {
       if (S.sync) return toast('Attendez la fin de la synchronisation en cours.');
       if (confirm('Relire ce portefeuille depuis sa hauteur de restauration ? Cela peut prendre quelques minutes.')) { await V.remove('st-' + t.dataset.rescan); await V.remove('cache-' + t.dataset.rescan); delete S.results[t.dataset.rescan]; location.hash = '#/soldes'; syncAll(t.dataset.rescan); }
@@ -457,14 +591,20 @@
     else if (a === 'test-node') { testNodeUi(); }
     else if (a === 'toggle-price') { S.settings.price = !S.settings.price; await V.setSetting('sync', S.settings); if (S.settings.price) refreshPrice(true); else S.price = null; skipScroll = true; render(); }
     else if (a === 'wipe') { if (confirm('Effacer le coffre, les portefeuilles et les réglages de cet appareil ? Vos fonds ne sont pas concernés.')) { await V.wipe(); location.hash = '#/bienvenue'; location.reload(); } }
-    else if (t.dataset.delW) { if (confirm('Retirer ce portefeuille de Prelevox ? (Vos fonds ne bougent pas.)')) { if (S.sync) cancelSync(); await V.remove(t.dataset.delW); await V.remove('cache-' + t.dataset.delW); await V.remove('st-' + t.dataset.delW); await loadReal(); render(); } }
+    else if (t.dataset.delW) { if (confirm('Retirer ce portefeuille de Prelevox ? (Vos fonds ne bougent pas.)')) { if (S.sync) cancelSync(); await V.remove(t.dataset.delW); await V.remove('cache-' + t.dataset.delW); await V.remove('st-' + t.dataset.delW); await V.remove('ki-' + t.dataset.delW); await loadReal(); render(); } }
     else if (t.dataset.delSub) { await V.remove(t.dataset.delSub); S.subs = await V.list('sub'); render(); }
   });
-  V.onChange(function () { cancelSync(); S.wallets = []; S.results = S.demo ? S.results : {}; S.subs = []; S.errors = {}; render(); });
+  V.onChange(function () { cancelSync(); S.resume = null; S.wallets = []; S.results = S.demo ? S.results : {}; S.subs = []; S.kis = {}; S.errors = {}; render(); });
   window.addEventListener('hashchange', render);
+  window.addEventListener('pagehide', pauseSync); // iOS : fermeture ou mise en veille de la PWA
+  window.addEventListener('pageshow', function (e) { if (e.persisted) resumeSync(); });
   /* Retour au premier plan (iOS met les PWA en pause) : synchro incrémentale si la dernière date de plus de 10 min. */
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState !== 'visible' || S.demo || S.sync || !V.isOpen() || !S.wallets.length) return;
+    if (document.visibilityState === 'hidden') { pauseSync(); return; }
+    if (S.sync && S.sync.paused) return; // la pause se termine, la reprise suivra
+    if (S.resume) return resumeSync();
+    if (S.sync) { wakeLock(true); return; } // le verrou d'écran est relâché par le navigateur en arrière-plan
+    if (S.demo || !V.isOpen() || !S.wallets.length) return;
     var last = Math.min.apply(null, S.wallets.map(function (w) { return S.results[w.id] ? S.results[w.id].balance.syncedAt : 0; }));
     if (Date.now() - last > 10 * 60 * 1000) { S.errors = {}; syncAll(); refreshPrice(); }
   });

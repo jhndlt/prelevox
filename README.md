@@ -1,8 +1,17 @@
 # Prelevox
 
-Déclinaison Monero de [Prelevo](https://github.com/jhndlt/prelevo). « Ce n'est pas un portefeuille, c'est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface. »
+Déclinaison Monero de Prelevo. « Ce n'est pas un portefeuille, c'est une télécommande qui se branche sur vos portefeuilles Monero pour une belle interface. »
 
-**En ligne :** https://jhndlt.github.io/prelevox/ · **démo (données fictives) :** https://jhndlt.github.io/prelevox/?demo=1
+En ligne : https://jhndlt.github.io/prelevox/ (démo : `?demo=1`).
+
+## Lancer et tester
+
+```
+python3 -m http.server 8765 --bind 127.0.0.1      # puis http://127.0.0.1:8765/
+node tests/keys.test.js                            # adresses, view key, refus spend key / phrase
+python3 tests/e2e.py                               # parcours démo + ajout + coffre (Chrome)
+python3 tests/e2e-sync.py [blocs]                  # VRAIE synchro mainnet (wallet public du Monero General Fund)
+```
 
 ## Comment ça marche
 
@@ -25,6 +34,30 @@ node.xmr.surf, xmr.0xrpc.io, monero.econanon.com, connect.xmr-node.org, monero.d
 Mode « Automatique » : premier nœud qui répond (ordre aléatoire). Réglages → « Mon propre nœud… » : le plus privé (monerod avec `--rpc-access-control-origins=https://jhndlt.github.io` derrière https). Les nœuds .onion ne sont pas joignables depuis un navigateur. Alternative avancée : votre propre serveur monero-lws (la view key lui est alors transmise ; non testé).
 
 Ce que voit le nœud : votre adresse IP, l'heure de synchro et les plages de blocs demandées. Jamais la view key ni l'adresse.
+
+## iPhone (Safari / PWA)
+
+- Pause propre quand l'app passe en arrière-plan (`visibilitychange` / `pagehide`) : la synchro s'arrête, l'état chiffré est sauvegardé, puis elle reprend seule au retour.
+- Tranches courtes sur iOS : 30 s ou 2 000 blocs, avec sauvegarde chiffrée à chaque tranche. Le worker WASM est libéré à la fin de chaque portefeuille.
+- Wake Lock (écran allumé) quand le navigateur le permet. Un message demande de garder l'app ouverte.
+- Nœud qui tombe en cours de synchro (mode Automatique) : bascule sur le nœud suivant sans perdre la progression, 4 fois au maximum. Un nœud bloqué plus de 2 min est traité comme tombé.
+
+## Solde exact (key images)
+
+Écran `#/exact`. Les key images sont lues et déchiffrées dans le navigateur, gardées chiffrées dans le coffre, puis appliquées avec `importKeyImages` de monero-ts après la synchro.
+- **Feather** : Prelevox exporte ses sorties (`exportOutputs`, fichier « Monero output export »). Dans Feather, on passe par Tools → Offline transaction signing → import du fichier, puis « Export key images » → fichier `*_keyImages`, qu'on importe dans Prelevox. Les key images correspondent ainsi exactement aux sorties lues par Prelevox.
+- **monero-wallet-cli** : `export_key_images all <fichier>`. Il faut que la hauteur de restauration de Prelevox précède la première réception.
+- Formats acceptés : binaire wallet2 « Monero key image export\x03 » (déchiffré par `vendor/px-crypto/px-crypto.wasm`), le même fichier en hexadécimal, et le JSON `signed_key_images` de monero-wallet-rpc.
+- Formats refusés : les QR animés UR. Un fichier d'un autre compte est refusé avant tout appel au nœud.
+- Confidentialité : comme dans Feather, le nœud reçoit les key images (`is_key_image_spent`). Votre propre nœud est donc recommandé.
+
+## Tests
+
+- `node tests/keys.test.js`
+- `node tests/keyimages.test.js` : vrai fichier CLI d'un portefeuille jetable, fichier synthétique, JSON, erreurs, fusion.
+- `python3 tests/e2e.py`
+- `python3 tests/e2e-sync.py`
+- `python3 tests/e2e-ios.py [blocs]` : iPhone 390×844, pause et reprise, bascule de nœud, export des sorties, refus de fausses key images, puis « Solde exact » avec le vrai fichier CLI.
 
 ## Limites (à lire)
 

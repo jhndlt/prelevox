@@ -9,6 +9,8 @@
     if (!sign) return (n < 0 ? '\u2212' : '') + s;
     return (n >= 0 ? '+' : '\u2212') + s;
   }
+  /* Pourcentage affiché seulement s'il a un sens (solde de départ non quasi nul). */
+  function relOk(start, rel) { return Math.abs(start) >= 1e-4 && isFinite(rel) && Math.abs(rel) < 10000; }
   function pct(n) {
     var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
     return (n >= 0 ? '+' : '\u2212') + s + ' %';
@@ -135,10 +137,10 @@
     var d = deltaInfo(series);
     var uid = String(Date.now() % 1e9);
     var aria = 'Évolution du solde sur ' + periodLabel(periodDays) + ' : ' +
-      fmtXmr(d.abs, true) + ' XMR (' + pct(d.rel) + ').';
+      fmtXmr(d.abs, true) + ' XMR' + (relOk(series[0].balance, d.rel) ? ' (' + pct(d.rel) + ')' : '') + '.';
     return '<div class="chart-card' + (reduceMotion() ? ' reduce-motion' : '') + '" id="bal-chart"' + (opts.noExtend ? ' data-noext="1"' : '') + ' data-period="' + periodDays + '" aria-label="' + aria.replace(/"/g, '&quot;') + '">' +
       '<div class="chart-head"><div><small>Évolution</small>' +
-      '<div class="chart-delta ' + (d.up ? 'up' : 'down') + '">' + fmtXmr(d.abs, true) + ' XMR' + (series[0].balance !== 0 ? ' · ' + pct(d.rel) : '') + '</div>' +
+      '<div class="chart-delta ' + (d.up ? 'up' : 'down') + '">' + fmtXmr(d.abs, true) + ' XMR' + (relOk(series[0].balance, d.rel) ? ' · ' + pct(d.rel) : '') + '</div>' +
       (opts.noExtend && series[0].ts > series[series.length - 1].ts - periodDays * 864e5 + 864e5 ? '<small class="chart-since">depuis le ' + new Date(series[0].ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + '</small>' : '') + '</div></div>' +
       '<div class="chart-periods" role="tablist" aria-label="Période du graphique">' +
       '<button type="button" role="tab" data-period="7"' + (periodDays === 7 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>7 j</button>' +
