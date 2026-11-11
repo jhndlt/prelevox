@@ -305,3 +305,6 @@ html[data-ui="matrix"] .grab{background:rgba(255,102,0,.5)}
 html[data-ui="matrix"] .sheet :is(.seg button,.btn,label,.msg,.alert,.sheet-note,.row){font-family:var(--mono)}
 html[data-ui="matrix"] .sheet :is(.seg button,.btn){text-transform:lowercase}
 .sheet .row .t div,.pxalerts .row .t div{white-space:normal}
+.pushst details summary{cursor:pointer;font-weight:600;font-size:13px;color:inherit}.pushst details p{margin-top:6px;opacity:.9}
+.warnline{color:var(--warn);font-size:12.5px}.small.pad{padding:0 14px 12px;color:var(--l);font-size:12px;line-height:1.45}
+html[data-ui="matrix"] .pushst details summary{font-family:var(--mono);color:var(--o)}

@@ -90,3 +90,14 @@ Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et �
 - **Onglet Prix** (`js/price.js`) : cours XMR en € (ou $), variation 24 h, périodes 24 h / 1 S / 1 M / 1 A / Tout, plus haut / plus bas 24 h. CoinGecko puis Kraken en secours, sans clé ni adresse envoyée. « Tout » vient de Kraken (CoinGecko public est limité à 365 jours).
 - **Alertes de prix** : au-dessus / en-dessous d'un prix (€ ou $), ou variation de X % en 24 h. Elles sont enregistrées sur l'appareil et vérifiées à l'ouverture puis toutes les 2 min tant que l'app est ouverte. Elles s'affichent dans l'app et, si vous l'autorisez, en notification. Sur iPhone, la notification demande d'avoir ajouté l'app à l'écran d'accueil. **Une fois l'app fermée, aucune alerte ne part** (il faudrait un serveur Web Push, non déployé).
 - Tests : `node tests/price.test.js`, `python3 tests/e2e-ptr-prix.py` (captures 43 à 51).
+
+## v7 (local) : alertes envoyées même app fermée
+
+- Serveur **prelevox-push** (Cloudflare Workers, **offre gratuite**) : https://prelevox-push.jhn-dlt.workers.dev — code dans `server/prelevox-push/worker.js`.
+  - `POST /subscribe`, `POST /alerts`, `DELETE /unsubscribe` ; CORS limité à `https://jhndlt.github.io`, autres origines refusées (403), 8 Ko max, 20 alertes max, limite de débit (30 requêtes/min par IP et par route), 500 abonnements max.
+  - Cron toutes les 5 min : un appel de cours (CoinGecko, Kraken en secours), évaluation des alertes, Web Push VAPID + chiffrement `aes128gcm` en WebCrypto (aucune dépendance). Notifications toujours visibles, en français. Alertes de seuil marquées « déclenchées » ; alertes de variation réarmées après 24 h. Abonnements en 404/410 supprimés ; abonnements inactifs depuis 120 jours effacés.
+  - **Stocké sur le serveur (KV)** : l'adresse d'abonnement push de l'appareil (endpoint Apple/Google + clés publiques du navigateur), les seuils, la devise, l'état des alertes, des dates. Identifiant = SHA-256(endpoint + secret aléatoire gardé sur l'appareil). **Jamais** d'adresse Monero, de view key ni de solde.
+  - Clé privée VAPID : générée chez Cloudflare et gardée en secret du Worker (jamais dans le dépôt). Clé publique dans `js/app.js`.
+- App : cloche → « Activer les notifications » (abonnement `pushManager` + envoi des alertes au serveur, resynchronisées à chaque changement), statut « Alertes envoyées même app fermée », bouton « Désactiver » (efface tout sur le serveur). Le service worker affiche chaque push et ouvre `#/prix` au toucher.
+- iPhone : iOS 16.4 ou plus, Prelevox **ajouté à l'écran d'accueil** et ouvert depuis son icône, puis cloche → « Activer les notifications ».
+- Test : `python3 tests/e2e-push.py` (origine https://jhndlt.github.io simulée en local, attend le cron, vérifie la notification reçue).
