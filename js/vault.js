@@ -4,6 +4,8 @@
    La clé AES n'est jamais exportable et ne vit qu'en mémoire tant que le coffre est ouvert. */
 (function (root) {
   'use strict';
+  var I18 = root.PxI18n || null; // textes : js/i18n.js
+  function T(k, v) { return I18 ? I18.t(k, v) : k; }
   var DB = 'prelevox', VER = 1, ITER = 600000, CHECK = 'prelevox-coffre-ok';
   var key = null, lockTimer = null, AUTOLOCK_MS = 5 * 60 * 1000, listeners = [];
 
@@ -59,8 +61,8 @@
     isOpen: function () { return !!key; },
     onChange: function (f) { listeners.push(f); },
     create: async function (pass) {
-      if (typeof pass !== 'string' || pass.length < 8) throw new Error('Votre phrase secrète doit compter au moins 8 caractères.');
-      if (await Vault.exists()) throw new Error('Un coffre existe déjà.');
+      if (typeof pass !== 'string' || pass.length < 8) throw new Error(T('v.short'));
+      if (await Vault.exists()) throw new Error(T('v.exists'));
       var salt = crypto.getRandomValues(new Uint8Array(16));
       var k = await derive(pass, salt, ITER);
       var chk = await seal(k, CHECK, 'check');
@@ -69,23 +71,23 @@
     },
     unlock: async function (pass) {
       var m = await get('meta', 'vault');
-      if (!m) throw new Error('Aucun coffre.');
+      if (!m) throw new Error(T('v.none'));
       var k = await derive(pass, m.salt, m.iter);
       try { if (await unseal(k, m.check, 'check') !== CHECK) throw 0; }
-      catch (e) { throw new Error('Phrase secrète incorrecte.'); }
+      catch (e) { throw new Error(T('v.wrong')); }
       key = k; touch(); return true;
     },
     lock: lock,
     touch: touch,
     /* Enregistre un objet chiffré (portefeuille, abonnement…). L'identifiant sert de donnée authentifiée. */
     save: async function (kind, id, obj) {
-      if (!key) throw new Error('Coffre verrouillé.');
+      if (!key) throw new Error(T('v.locked'));
       touch();
       var s = await seal(key, obj, kind + ':' + id);
       await put('items', { id: id, kind: kind, iv: s.iv, ct: s.ct, updated: Date.now() });
     },
     list: async function (kind) {
-      if (!key) throw new Error('Coffre verrouillé.');
+      if (!key) throw new Error(T('v.locked'));
       touch();
       var rows = (await all('items')).filter(function (r) { return r.kind === kind; });
       var out = [];
@@ -94,7 +96,7 @@
     },
     /* Lit un seul objet chiffré (null s'il n'existe pas). */
     load: async function (kind, id) {
-      if (!key) throw new Error('Coffre verrouillé.');
+      if (!key) throw new Error(T('v.locked'));
       touch();
       var r = await get('items', id);
       if (!r || r.kind !== kind) return null;

@@ -1,0 +1,36 @@
+{
+  "id": "./",
+  "name": "Prelevox – your Monero wallets, read-only",
+  "short_name": "Prelevox",
+  "description": "It’s not a wallet. It’s a remote that plugs into your Monero wallets for a beautiful interface.",
+  "lang": "en",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0B0C",
+  "theme_color": "#0B0B0C",
+  "categories": [
+    "finance"
+  ],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

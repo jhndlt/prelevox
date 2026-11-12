@@ -67,6 +67,8 @@ Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et �
 - `python3 tests/e2e-sync.py`
 - `python3 tests/e2e-theme.py` : apparences « matrix » et « classique », persistance du choix, captures 31 à 41.
 - `python3 tests/e2e-ios.py [blocs]` : iPhone 390×844, pause et reprise, bascule de nœud, export des sorties, refus de fausses key images, puis « Solde exact » avec le vrai fichier CLI.
+- `python3 tests/e2e-i18n.py` (v9) : français ↔ anglais sans rechargement, aucun mot français dans l'interface anglaise (texte visible, libellés ARIA, toasts, feuille d'alertes), formats en-US / fr-FR, aucune erreur console ; captures 64 à 66.
+- `node tests/price.test.js` (alertes et textes fr + en) · `node tests/worker-i18n.test.mjs` (texte des notifications du Worker en fr / en).
 
 ## Limites (à lire)
 
@@ -108,3 +110,13 @@ Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et �
 - Thème « matrix » refait sur le modèle des écrans d'infos de Bitchat iOS : noir pur et plat, monospace partout, minuscules, tout en orange #FF6600, texte secondaire orange à 65 %, titres de section en CAPITALES grasses, listes à plat avec icônes au trait (22 px) et chevron « > » si la ligne est cliquable, aucun halo. Les gris (#1c1c1e / #3a3a3c) ne servent qu'aux commandes : segments, pastilles, boutons, bouton fermer rond.
 - Réglages : en-tête centré « prelevox » + segments « réglages | infos ». L'onglet « infos » regroupe Mode d'emploi, Fonctionnalités, Confidentialité, Symboles et À propos.
 - Le thème « classique » reste disponible dans Réglages → Apparence.
+
+## v9 (local) : version anglaise
+
+- **Langue** : Réglages → Apparence → « Langue · Language » : auto / français / english. Choix gardé sur l'appareil (`localStorage` « px-lang », non sensible) et appliqué tout de suite, sans rechargement (écrans, barre d'onglets, feuille d'alertes ouverte, titre de la page, manifeste).
+- **Par défaut (« auto »)** : anglais si la langue de l'appareil commence par « en », sinon français.
+- **`js/i18n.js`** : dictionnaires `fr` et `en` (≈ 500 textes, mêmes clés dans les deux, vérifié par le test) pour tous les écrans, feuilles, l'onglet infos, erreurs (adresse, clé, coffre, nœud, key images, synchro), toasts, états vides, accueil et ajout de portefeuille. `PxI18n.t('clé', {variables})`, pluriels (`tn`), formats selon la langue (en-US / fr-FR : nombres, montants, dates, heures, %).
+- Les libellés de données générés par la synchro ou la démo (« Reçu », « Sortie détectée », portefeuilles de démo…) restent stockés en français et sont traduits à l'affichage : les caches existants s'affichent donc aussi en anglais.
+- Message clé en anglais : « It’s not a wallet. It’s a remote that plugs into your Monero wallets for a beautiful interface. »
+- **Notifications d'alerte (Worker `prelevox-push`)** : le texte est rédigé côté serveur dans la langue de l'abonnement. L'app envoie `lang` (fr | en) à `/subscribe` et `/alerts` (et resynchronise quand on change de langue). Rétrocompatible : un abonnement sans langue (créé avant la v9) reste en français. Le serveur stocke donc aussi la langue des notifications (texte « Ce qui est stocké sur le serveur » mis à jour). Le service worker affiche un texte de secours dans la même langue.
+- `manifest.en.json` (nom et description en anglais), choisi selon la langue. Cache `prelevox-v9`.

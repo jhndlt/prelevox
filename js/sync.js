@@ -8,6 +8,8 @@
    Aucune source ne peut envoyer de fonds : aucune ne reçoit de clé de dépense. */
 (function (root) {
   'use strict';
+  var I18 = root.PxI18n || (typeof require === 'function' ? require('./i18n.js') : null); // textes : js/i18n.js
+  function T(k, v) { return I18 ? I18.t(k, v) : k; }
   var PICO = 1e12, DAY = 864e5;
   function toXmr(v) { try { return Number(BigInt(String(v == null ? 0 : v))) / PICO; } catch (e) { return Number(v || 0) / PICO; } }
 
@@ -52,24 +54,24 @@
   function host(u) { try { return new URL(u).host; } catch (e) { return u || '?'; } }
   function friendlyError(e, node) {
     var m = String((e && e.message) || e || '');
-    if (/annul/i.test(m) || (e && e.cancelled)) return 'Synchronisation annulée. La progression est conservée.';
+    if (/annul/i.test(m) || (e && e.cancelled)) return T('sy.cancelled');
     if (/Network Error|Failed to fetch|NetworkError|Load failed|not connected to daemon|daemon error|thread pool|no connection|ERR_|CORS|timed? ?out|Timeout|abort/i.test(m))
-      return 'Le nœud ' + host(node) + ' ne répond pas ou refuse les connexions depuis un navigateur (CORS). Essayez un autre nœud dans Réglages.';
-    if (/invalid.*(address|key)|address.*invalid|key.*invalid|Invalid primary/i.test(m)) return 'Adresse ou clé de visualisation refusée par Monero. Vérifiez-les puis rajoutez le portefeuille.';
-    if (/memory|Out of bounds|RangeError/i.test(m)) return 'Mémoire insuffisante sur cet appareil. Fermez d\u2019autres onglets puis relancez la synchronisation.';
-    if (/worker|importScripts|monero-ts/i.test(m)) return 'Le module Monero n\u2019a pas pu démarrer dans ce navigateur. Rechargez la page.';
-    return 'Synchronisation impossible : ' + m.slice(0, 160);
+      return T('sy.cors', { h: host(node) });
+    if (/invalid.*(address|key)|address.*invalid|key.*invalid|Invalid primary/i.test(m)) return T('sy.badKey');
+    if (/memory|Out of bounds|RangeError/i.test(m)) return T('sy.memory');
+    if (/worker|importScripts|monero-ts/i.test(m)) return T('sy.module');
+    return T('sy.generic', { m: m.slice(0, 160) });
   }
 
   /* ---------- Vérification d'un nœud (requête « get_info », sans aucune donnée de portefeuille) ---------- */
   function checkNodeUrl(u) {
-    if (!u) throw new Error('Indiquez l\u2019adresse du nœud.');
-    var url; try { url = new URL(u.trim()); } catch (e) { throw new Error('Adresse de nœud invalide. Exemple : https://mon-noeud.exemple:18089'); }
-    if (/\.onion$/i.test(url.hostname)) throw new Error('Les nœuds .onion ne sont pas joignables depuis un navigateur classique. Utilisez une adresse https://.');
+    if (!u) throw new Error(T('sy.nodeMissing'));
+    var url; try { url = new URL(u.trim()); } catch (e) { throw new Error(T('sy.nodeBad')); }
+    if (/\.onion$/i.test(url.hostname)) throw new Error(T('sy.onion'));
     var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname);
     if (url.protocol === 'http:' && !local && root.location && root.location.protocol === 'https:')
-      throw new Error('Votre navigateur bloque les nœuds en http:// depuis une page sécurisée. Utilisez une adresse https://.');
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Adresse de nœud invalide.');
+      throw new Error(T('sy.http'));
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(T('sy.nodeBad2'));
     return url.origin + url.pathname.replace(/\/+$/, '');
   }
   async function testNode(u, timeoutMs) {
@@ -79,15 +81,15 @@
     try {
       var r = await fetch(base + '/json_rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
         body: JSON.stringify({ jsonrpc: '2.0', id: '0', method: 'get_info' }), signal: ctl ? ctl.signal : undefined });
-      if (!r.ok) throw new Error('Le nœud a répondu ' + r.status + '.');
+      if (!r.ok) throw new Error(T('sy.status', { s: r.status }));
       var j = await r.json(), info = j && j.result;
-      if (!info || info.status !== 'OK') throw new Error('Réponse inattendue du nœud.');
-      if (info.nettype && info.nettype !== 'mainnet') throw new Error('Ce nœud n\u2019est pas sur le réseau principal (' + info.nettype + ').');
-      if (info.synchronized === false) throw new Error('Ce nœud n\u2019est pas encore synchronisé.');
+      if (!info || info.status !== 'OK') throw new Error(T('sy.unexpected'));
+      if (info.nettype && info.nettype !== 'mainnet') throw new Error(T('sy.nettype', { n: info.nettype }));
+      if (info.synchronized === false) throw new Error(T('sy.notSynced'));
       return { url: base, height: info.height, restricted: !!info.restricted };
     } catch (e) {
-      if (e && e.name === 'AbortError') throw new Error('Le nœud ' + host(base) + ' ne répond pas (délai dépassé).');
-      if (e instanceof TypeError) throw new Error('Le nœud ' + host(base) + ' est injoignable depuis le navigateur (hors ligne ou CORS refusé).');
+      if (e && e.name === 'AbortError') throw new Error(T('sy.timeout', { h: host(base) }));
+      if (e instanceof TypeError) throw new Error(T('sy.unreach', { h: host(base) }));
       throw e;
     } finally { clearTimeout(t); }
   }
@@ -103,7 +105,7 @@
     for (var i = 0; i < list.length; i++) {
       try { var r = await testNode(list[i], 6000); lastGood = r.url; return r.url; } catch (e) { errs.push(e.message); }
     }
-    throw new Error('Aucun nœud public n\u2019a répondu. Vérifiez votre connexion, ou indiquez votre propre nœud dans Réglages.');
+    throw new Error(T('sy.noPublic'));
   }
 
   /* ---------- base64 <-> octets (pour stocker l'état du portefeuille chiffré dans le coffre) ---------- */
@@ -113,8 +115,8 @@
 
   /* 1) Démo : données fictives générées localement. */
   var DemoProvider = {
-    id: 'demo', label: 'Démo (données fictives)', keysLeaveDevice: false,
-    description: 'Aucune connexion réseau. Montants et opérations inventés pour présenter l\u2019application.',
+    id: 'demo', get label() { return T('sy.demoLabel'); }, keysLeaveDevice: false,
+    get description() { return T('sy.demoDesc'); },
     available: function () { return Promise.resolve(true); },
     sync: function (wallet) { return Promise.resolve({ result: root.PxDemo.forWallet(wallet.id) }); }
   };
@@ -128,7 +130,7 @@
     if (!libPromise) libPromise = new Promise(function (res, rej) {
       var s = document.createElement('script'); s.src = 'vendor/monero-ts/monero-ts.js?v=3'; s.async = true;
       s.onload = function () { root.moneroTs ? res(root.moneroTs) : rej(new Error('monero-ts introuvable')); };
-      s.onerror = function () { libPromise = null; rej(new Error('Le module monero-ts n\u2019a pas pu être chargé (hors ligne ?).')); };
+      s.onerror = function () { libPromise = null; rej(new Error(T('sy.libFail'))); };
       document.head.appendChild(s);
     }).then(function (m) {
       m.LibraryUtils.setWorkerDistPath(new URL('vendor/monero-ts/monero.worker.js?v=3', root.location.href).href);
@@ -149,16 +151,16 @@
   function isNetErr(e) { return /Network Error|Failed to fetch|NetworkError|Load failed|not connected to daemon|no connection|ERR_|CORS|timed? ?out|Timeout|abort|daemon|bloqué|blocage/i.test(String((e && e.message) || e || '')); }
   function kiError(e) {
     var m = String((e && e.message) || e || '');
-    if (/out of date|Offset larger/i.test(m)) return 'Le fichier contient des sorties que Prelevox n\u2019a pas (encore) trouvées. Vérifiez la date de création du portefeuille (Réglages → Relire), laissez la synchronisation se terminer, puis réimportez.';
-    if (/Signature check failed|signature/i.test(m)) return 'Ces key images ne correspondent pas aux sorties lues par Prelevox. Relisez le portefeuille depuis sa date de création exacte, puis réimportez un export complet (« all »).';
-    if (/validity domain|ge_frombytes|Key image/i.test(m)) return 'Ce fichier contient des key images invalides (abîmé ou non issu de Monero) : refaites l\u2019export.';
-    if (isNetErr(e)) return 'Le nœud n\u2019a pas répondu pendant la vérification des key images. Réessayez.';
-    return 'Import des key images impossible : ' + m.slice(0, 140);
+    if (/out of date|Offset larger/i.test(m)) return T('sy.kiOutdated');
+    if (/Signature check failed|signature/i.test(m)) return T('sy.kiSig');
+    if (/validity domain|ge_frombytes|Key image/i.test(m)) return T('sy.kiInvalid');
+    if (isNetErr(e)) return T('sy.kiNet');
+    return T('sy.kiGeneric', { m: m.slice(0, 140) });
   }
 
   var MoneroTsProvider = {
-    id: 'monero-ts', label: 'Scan local via un nœud (recommandé)', keysLeaveDevice: false,
-    description: 'Les blocs sont téléchargés depuis un nœud Monero et analysés dans votre navigateur. Votre view key ne quitte jamais l\u2019appareil.',
+    id: 'monero-ts', get label() { return T('sy.tsLabel'); }, keysLeaveDevice: false,
+    get description() { return T('sy.tsDesc'); },
     available: function () { return loadLib().then(function () { return true; }, function () { return false; }); },
     sync: async function (wallet, settings, hooks) {
       hooks = hooks || {};
@@ -193,7 +195,7 @@
         return h;
       };
       try {
-        if (!(await w.isViewOnly())) throw new Error('Refusé : Prelevox n\u2019ouvre que des portefeuilles en lecture seule.');
+        if (!(await w.isViewOnly())) throw new Error(T('sy.notVo'));
         var lastProgress = Date.now(), chunkStart = null;
         var Listener = function () {}; Listener.prototype = Object.create(m.MoneroWalletListener.prototype);
         Listener.prototype.onSyncProgress = async function (height, startHeight, endHeight) {
@@ -225,7 +227,7 @@
             if (syncErr && !nodeDown) { try { await testNode(node, 6000); } catch (e) { nodeDown = true; } } // erreur interne (« Exception in thread pool »…) : le nœud répond-il encore ?
             if (!nodeDown || failovers >= L.maxFailover || (settings && settings.node && settings.node !== 'auto')) {
               try { await save(); } catch (e) {}
-              throw syncErr || new Error('Timeout : le nœud ne répond plus');
+              throw syncErr || new Error('Timeout: node stopped responding');
             }
             failovers++; still = 0; tried.push(node);
             try { await save(); } catch (e) {}
@@ -281,11 +283,11 @@
   /* Fichier « outputs » (sorties reçues, chiffré avec la view key) à charger dans Feather pour obtenir les key images
      correspondant EXACTEMENT aux sorties vues par Prelevox. Aucune clé privée n'y figure. Hors ligne : aucun nœud contacté. */
   async function exportOutputs(wallet, st) {
-    if (!st || !st.keysData) throw new Error('Synchronisez d\u2019abord ce portefeuille.');
+    if (!st || !st.keysData) throw new Error(T('sy.syncFirst'));
     var m = await loadLib(), w;
     w = await m.openWalletFull({ networkType: m.MoneroNetworkType.MAINNET, password: st.pw, keysData: b64d(st.keysData), cacheData: st.cacheData ? b64d(st.cacheData) : undefined });
     try {
-      if (!(await w.isViewOnly())) throw new Error('Refusé : portefeuille non lecture seule.');
+      if (!(await w.isViewOnly())) throw new Error(T('sy.notVo2'));
       var hex = await w.exportOutputs(true), u = new Uint8Array(hex.length / 2);
       for (var i = 0; i < u.length; i++) u[i] = parseInt(hex.substr(i * 2, 2), 16);
       var n = (await w.getOutputs()).length;
@@ -298,14 +300,14 @@
         Désactivé par défaut ; à n'utiliser qu'avec votre propre monero-lws. */
   function post(base, path, body) {
     return fetch(base.replace(/\/$/, '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
-      .then(function (r) { if (!r.ok) throw new Error('Le serveur a répondu ' + r.status + '.'); return r.json(); });
+      .then(function (r) { if (!r.ok) throw new Error(T('sy.srvStatus', { s: r.status })); return r.json(); });
   }
   var LwsProvider = {
-    id: 'lws', label: 'Mon serveur monero-lws (avancé)', keysLeaveDevice: true,
-    description: 'Votre propre serveur light wallet scanne pour vous. La view key lui est transmise (lecture seule, aucun envoi possible). Non testé.',
+    id: 'lws', get label() { return T('sy.lwsLabel'); }, keysLeaveDevice: true,
+    get description() { return T('sy.lwsDesc'); },
     available: function () { return Promise.resolve(true); },
     sync: async function (wallet, settings) {
-      var base = settings.lwsUrl; if (!base) throw new Error('Indiquez l\u2019adresse de votre serveur monero-lws dans Réglages.');
+      var base = settings.lwsUrl; if (!base) throw new Error(T('sy.lwsMissing'));
       base = checkNodeUrl(base);
       var cred = { address: wallet.address, view_key: wallet.viewKey };
       await post(base, '/login', Object.assign({ create_account: true, generated_locally: false }, cred)).catch(function () {});

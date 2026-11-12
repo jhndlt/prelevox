@@ -1,22 +1,25 @@
 /* Prelevox – graphique d'évolution du solde (SVG fait main, zéro dépendance). */
 (function (root) {
   'use strict';
+  var I18 = root.PxI18n || (typeof require === 'function' ? require('./i18n.js') : null); // textes : js/i18n.js
+  function T(k, v) { return I18 ? I18.t(k, v) : k; }
+  function loc() { return I18 ? I18.locale() : 'fr-FR'; }
   var ORANGE = '#FF6600';
   var W = 360, H = 148, PAD_T = 12, PAD_B = 8, PAD_X = 4;
 
   function fmtXmr(n, sign) {
-    var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+    var s = Math.abs(n).toLocaleString(loc(), { minimumFractionDigits: 4, maximumFractionDigits: 4 });
     if (!sign) return (n < 0 ? '\u2212' : '') + s;
     return (n >= 0 ? '+' : '\u2212') + s;
   }
   /* Pourcentage affiché seulement s'il a un sens (solde de départ non quasi nul). */
   function relOk(start, rel) { return Math.abs(start) >= 1e-4 && isFinite(rel) && Math.abs(rel) < 10000; }
   function pct(n) {
-    var s = Math.abs(n).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    return (n >= 0 ? '+' : '\u2212') + s + ' %';
+    var s = Math.abs(n).toLocaleString(loc(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return (n >= 0 ? '+' : '\u2212') + T('pct', { n: s });
   }
   function dmy(ts) {
-    return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+    return new Date(ts).toLocaleDateString(loc(), { day: 'numeric', month: 'short', year: 'numeric' });
   }
   function reduceMotion() {
     try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
@@ -116,9 +119,9 @@
   }
 
   function periodLabel(days) {
-    if (days <= 7) return '7 jours';
-    if (days <= 30) return '30 jours';
-    return '1 an';
+    if (days <= 7) return T('ch.l7');
+    if (days <= 30) return T('ch.l30');
+    return T('ch.l365');
   }
 
   function cardHtml(points, periodDays, emptyMsg, opts) {
@@ -126,26 +129,25 @@
     periodDays = periodDays || 30;
     if (!points || points.length < 2) {
       return '<div class="chart-card chart-empty" id="bal-chart">' +
-        '<p>' + (emptyMsg || 'L\u2019historique apparaîtra après la première synchronisation.') + '</p></div>';
+        '<p>' + (emptyMsg || T('ch.empty')) + '</p></div>';
     }
     var series = sample(points, periodDays, opts.noExtend);
     if (series.length < 2) {
       return '<div class="chart-card chart-empty" id="bal-chart"><p>' +
-        (emptyMsg || 'L\u2019historique apparaîtra après la première synchronisation.') + '</p></div>';
+        (emptyMsg || T('ch.empty')) + '</p></div>';
     }
     var pts = layout(series);
     var d = deltaInfo(series);
     var uid = String(Date.now() % 1e9);
-    var aria = 'Évolution du solde sur ' + periodLabel(periodDays) + ' : ' +
-      fmtXmr(d.abs, true) + ' XMR' + (relOk(series[0].balance, d.rel) ? ' (' + pct(d.rel) + ')' : '') + '.';
+    var aria = T('ch.aria', { p: periodLabel(periodDays), v: fmtXmr(d.abs, true) + ' XMR' + (relOk(series[0].balance, d.rel) ? ' (' + pct(d.rel) + ')' : '') });
     return '<div class="chart-card' + (reduceMotion() ? ' reduce-motion' : '') + '" id="bal-chart"' + (opts.noExtend ? ' data-noext="1"' : '') + ' data-period="' + periodDays + '" aria-label="' + aria.replace(/"/g, '&quot;') + '">' +
-      '<div class="chart-head"><div><small>Évolution</small>' +
+      '<div class="chart-head"><div><small>' + T('ch.title') + '</small>' +
       '<div class="chart-delta ' + (d.up ? 'up' : 'down') + '">' + fmtXmr(d.abs, true) + ' XMR' + (relOk(series[0].balance, d.rel) ? ' · ' + pct(d.rel) : '') + '</div>' +
-      (opts.noExtend && series[0].ts > series[series.length - 1].ts - periodDays * 864e5 + 864e5 ? '<small class="chart-since">depuis le ' + new Date(series[0].ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + '</small>' : '') + '</div></div>' +
-      '<div class="chart-periods" role="tablist" aria-label="Période du graphique">' +
-      '<button type="button" role="tab" data-period="7"' + (periodDays === 7 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>7 j</button>' +
-      '<button type="button" role="tab" data-period="30"' + (periodDays === 30 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>30 j</button>' +
-      '<button type="button" role="tab" data-period="365"' + (periodDays === 365 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>1 an</button>' +
+      (opts.noExtend && series[0].ts > series[series.length - 1].ts - periodDays * 864e5 + 864e5 ? '<small class="chart-since">' + T('ch.since', { d: new Date(series[0].ts).toLocaleDateString(loc(), { day: 'numeric', month: 'short' }) }) + '</small>' : '') + '</div></div>' +
+      '<div class="chart-periods" role="tablist" aria-label="' + T('ch.periods') + '">' +
+      '<button type="button" role="tab" data-period="7"' + (periodDays === 7 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + T('ch.p7') + '</button>' +
+      '<button type="button" role="tab" data-period="30"' + (periodDays === 30 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + T('ch.p30') + '</button>' +
+      '<button type="button" role="tab" data-period="365"' + (periodDays === 365 ? ' class="on" aria-selected="true"' : ' aria-selected="false"') + '>' + T('ch.p365') + '</button>' +
       '</div>' +
       '<div class="chart-body">' + svgMarkup(pts, uid) +
       '<div class="chart-tip" hidden><b></b><small></small></div></div></div>';

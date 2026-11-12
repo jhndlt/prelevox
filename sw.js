@@ -1,7 +1,7 @@
 /* Prelevox – service worker : coque de l'app hors ligne. Ne met JAMAIS en cache une requête vers un nœud ou un serveur. */
-const CACHE = 'prelevox-v8';
+const CACHE = 'prelevox-v9';
 const VENDOR = 'prelevox-vendor-monero-ts-0.11.22'; // module Monero (~4 Mo) : mis en cache à la première synchro, puis servi hors ligne
-const ASSETS = ['./', './index.html', './styles.css?v=8', './manifest.json', './js/theme.js?v=8', './js/keys.js?v=8', './js/vault.js?v=8', './js/demo.js?v=8', './js/chart.js?v=8', './js/keyimages.js?v=8', './js/sync.js?v=8', './js/price.js?v=8', './js/ptr.js?v=8', './js/app.js?v=8', './js/register-sw.js?v=8',
+const ASSETS = ['./', './index.html', './styles.css?v=9', './manifest.json', './manifest.en.json', './js/theme.js?v=9', './js/i18n.js?v=9', './js/keys.js?v=9', './js/vault.js?v=9', './js/demo.js?v=9', './js/chart.js?v=9', './js/keyimages.js?v=9', './js/sync.js?v=9', './js/price.js?v=9', './js/ptr.js?v=9', './js/app.js?v=9', './js/register-sw.js?v=9',
   './fonts/inter-latin.woff2', './icons/mark.png', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/favicon-32.png', './icons/apple-touch-icon-180.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== CACHE && x !== VENDOR && x !== 'prelevox-fired').map(x => caches.delete(x)))).then(() => self.clients.claim())));
@@ -23,8 +23,12 @@ self.addEventListener('fetch', e => {
 self.addEventListener('push', e => {
   let d = {}; try { d = e.data ? e.data.json() : {}; } catch (err) {}
   const n = d.notification || {};
-  const title = n.title || 'Alerte de prix XMR';
-  const opts = { body: n.body || 'Une de vos alertes de prix Prelevox s\u2019est déclenchée. Touchez pour voir le cours.', tag: n.tag || 'px-alerte', lang: 'fr',
+  // Texte rédigé par le serveur dans la langue de l'abonnement ; secours local dans la même langue (sinon celle de l'appareil).
+  const lang = n.lang === 'en' || n.lang === 'fr' ? n.lang : (/^en\b/i.test(self.navigator.language || '') ? 'en' : 'fr');
+  const FB = { fr: ['Alerte de prix XMR', 'Une de vos alertes de prix Prelevox s\u2019est déclenchée. Touchez pour voir le cours.'],
+    en: ['XMR price alert', 'One of your Prelevox price alerts was triggered. Tap to see the price.'] }[lang];
+  const title = n.title || FB[0];
+  const opts = { body: n.body || FB[1], tag: n.tag || 'px-alerte', lang: lang,
     icon: './icons/icon-192.png', badge: './icons/favicon-32.png', data: { url: n.navigate || './#/prix' }, renotify: true };
   const fired = d.prelevox && d.prelevox.id ? rememberFired(d.prelevox) : Promise.resolve();
   e.waitUntil(Promise.all([self.registration.showNotification(title, opts), fired]));

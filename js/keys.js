@@ -4,6 +4,8 @@
    mathématiquement à quelle clé publique de l'adresse correspond la clé collée. */
 (function (root) {
   'use strict';
+  var I18 = root.PxI18n || (typeof require === 'function' ? require('./i18n.js') : null); // textes : js/i18n.js
+  function T(k, v) { return I18 ? I18.t(k, v) : k; }
 
   /* ---------- Keccak-256 (variante Monero, padding 0x01) ---------- */
   var RC = ['0x1','0x8082','0x800000000000808a','0x8000000080008000','0x808b','0x80000001','0x8000000080008081','0x8000000000008009','0x8a','0x88','0x80008009','0x8000000a','0x8000808b','0x800000000000008b','0x8000000000008089','0x8000000000008003','0x8000000000008002','0x8000000000000080','0x800a','0x800000008000000a','0x8000000080008081','0x8000000000008080','0x80000001','0x8000000080008008'].map(BigInt);
@@ -123,14 +125,14 @@
   };
   function parseAddress(addr) {
     addr = String(addr || '').trim();
-    if (!addr) return { ok: false, error: 'Veuillez coller l’adresse publique du portefeuille.' };
-    if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(addr)) return { ok: false, error: 'Cette adresse contient des caractères qui n’existent pas dans une adresse Monero.' };
-    if (addr.length !== 95 && addr.length !== 106) return { ok: false, error: 'Une adresse Monero compte 95 caractères (106 pour une adresse intégrée). Celle-ci en compte ' + addr.length + '.' };
-    var raw; try { raw = b58decode(addr); } catch (e) { return { ok: false, error: 'Adresse illisible : vérifiez qu’elle est complète.' }; }
+    if (!addr) return { ok: false, error: T('k.pasteAddr') };
+    if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(addr)) return { ok: false, error: T('k.badChars') };
+    if (addr.length !== 95 && addr.length !== 106) return { ok: false, error: T('k.length', { n: addr.length }) };
+    var raw; try { raw = b58decode(addr); } catch (e) { return { ok: false, error: T('k.unreadable') }; }
     var body = raw.subarray(0, raw.length - 4), sum = raw.subarray(raw.length - 4);
-    if (!eq(keccak256(body).subarray(0, 4), sum)) return { ok: false, error: 'La somme de contrôle ne correspond pas : l’adresse contient sans doute une faute de frappe.' };
+    if (!eq(keccak256(body).subarray(0, 4), sum)) return { ok: false, error: T('k.checksum') };
     var net = NETS[raw[0]];
-    if (!net) return { ok: false, error: 'Ce n’est pas une adresse Monero reconnue.' };
+    if (!net) return { ok: false, error: T('k.unknownNet') };
     return {
       ok: true, address: addr, network: net[0], type: net[1],
       publicSpend: raw.subarray(1, 33), publicView: raw.subarray(33, 65),
@@ -148,22 +150,22 @@
      Résultat : { ok, kind: 'view' | 'spend' | 'unknown' | 'seed' | 'invalid', error } */
   function checkKey(parsed, keyInput) {
     var k = String(keyInput || '').trim();
-    if (looksLikeSeed(k)) return { ok: false, kind: 'seed', error: 'Ceci ressemble à une phrase de récupération. Ne la saisissez jamais ici : elle donne le contrôle total de vos fonds. Nous l’avons effacée sans l’enregistrer ; utilisez uniquement la clé de visualisation (view key).' };
-    if (!/^[0-9a-fA-F]{64}$/.test(k)) return { ok: false, kind: 'invalid', error: 'La clé de visualisation compte 64 caractères hexadécimaux (0-9, a-f).' };
+    if (looksLikeSeed(k)) return { ok: false, kind: 'seed', error: T('k.seed') };
+    if (!/^[0-9a-fA-F]{64}$/.test(k)) return { ok: false, kind: 'invalid', error: T('k.hex') };
     var kb = unhex(k.toLowerCase());
     var n = decodeInt(kb);
-    if (n === 0n || n >= L) return { ok: false, kind: 'invalid', error: 'Cette clé n’est pas une clé privée Monero valide.' };
-    if (!parsed || !parsed.ok) return { ok: false, kind: 'unknown', error: 'Collez d’abord une adresse valide pour vérifier la clé.' };
+    if (n === 0n || n >= L) return { ok: false, kind: 'invalid', error: T('k.invalid') };
+    if (!parsed || !parsed.ok) return { ok: false, kind: 'unknown', error: T('k.addrFirst') };
     var pub = scalarPub(kb);
     if (parsed.type === 'subaddress') {
       // Sous-adresse : C = a·D (D = clé publique de dépense de la sous-adresse)
       var Dp = decompress(parsed.publicSpend);
       if (Dp && eq(compress(mul(n, Dp)), parsed.publicView)) return { ok: true, kind: 'view' };
-      return { ok: false, kind: 'unknown', error: 'Cette clé ne correspond pas à la sous-adresse. Utilisez de préférence l’adresse principale (qui commence par 4).' };
+      return { ok: false, kind: 'unknown', error: T('k.subMismatch') };
     }
-    if (eq(pub, parsed.publicSpend)) return { ok: false, kind: 'spend', error: 'Attention : c’est votre clé de DÉPENSE (spend key). Prelevox la refuse : nous l’avons effacée sans l’enregistrer. Collez à la place la clé de visualisation (view key).' };
+    if (eq(pub, parsed.publicSpend)) return { ok: false, kind: 'spend', error: T('k.spend') };
     if (eq(pub, parsed.publicView)) return { ok: true, kind: 'view' };
-    return { ok: false, kind: 'unknown', error: 'Cette clé ne correspond pas à cette adresse. Vérifiez que vous avez copié la clé de visualisation privée du même portefeuille.' };
+    return { ok: false, kind: 'unknown', error: T('k.mismatch') };
   }
 
   function short(addr) { return addr ? addr.slice(0, 4) + '…' + addr.slice(-4) : ''; }

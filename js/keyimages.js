@@ -8,6 +8,8 @@
    Une key image ne permet AUCUN envoi : elle sert seulement à reconnaître les sorties déjà dépensées. */
 (function (root) {
   'use strict';
+  var I18 = root.PxI18n || (typeof require === 'function' ? require('./i18n.js') : null); // textes : js/i18n.js
+  function T(k, v) { return I18 ? I18.t(k, v) : k; }
   var MAGIC = 'Monero key image export\u0003', ML = MAGIC.length;
   var wasm = null;
   function hex(u8) { return Array.from(u8, function (b) { return b.toString(16).padStart(2, '0'); }).join(''); }
@@ -17,7 +19,7 @@
 
   async function loadWasm(bytes) {
     if (wasm) return wasm;
-    if (!bytes) { var r = await fetch('vendor/px-crypto/px-crypto.wasm?v=1', { credentials: 'omit' }); if (!r.ok) throw err('wasm', 'Le module de déchiffrement n\u2019a pas pu être chargé.'); bytes = await r.arrayBuffer(); }
+    if (!bytes) { var r = await fetch('vendor/px-crypto/px-crypto.wasm?v=1', { credentials: 'omit' }); if (!r.ok) throw err('wasm', T('ki.wasm')); bytes = await r.arrayBuffer(); }
     var inst = null;
     var res = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: { random_get: function (p, n) { crypto.getRandomValues(new Uint8Array(inst.exports.memory.buffer, p, n)); return 0; } } });
     inst = res.instance || res; inst.exports._initialize && inst.exports._initialize();
@@ -41,15 +43,15 @@
   async function decodeBinary(u8, viewKeyHex, pub) {
     await loadWasm();
     var body = u8.subarray(ML);
-    if (body.length < 8 + 68 + 64) throw err('size', 'Fichier de key images trop court ou incomplet.');
+    if (body.length < 8 + 68 + 64) throw err('size', T('ki.short'));
     var iv = body.subarray(0, 8), ct = body.subarray(8, body.length - 64); // les 64 derniers octets = signature d'authentification
     var vk = unhex(viewKeyHex), key = chachaKey(vk); vk.fill(0);
     var pt = chacha20(ct, key, iv); key.fill(0);
     var offset = (pt[0] | (pt[1] << 8) | (pt[2] << 16) | (pt[3] << 24)) >>> 0;
     var spend = pt.subarray(4, 36), view = pt.subarray(36, 68);
     if (pub && (!eq(spend, pub.spend) || !eq(view, pub.view)))
-      throw err('account', 'Ce fichier ne correspond pas à ce portefeuille (ou il a été exporté depuis un autre compte).');
-    if ((pt.length - 68) % 96) throw err('size', 'Fichier de key images abîmé (taille inattendue).');
+      throw err('account', T('ki.account'));
+    if ((pt.length - 68) % 96) throw err('size', T('ki.size'));
     var items = [];
     for (var i = 68; i < pt.length; i += 96) items.push([hex(pt.subarray(i, i + 32)), hex(pt.subarray(i + 32, i + 96))]);
     pt.fill(0);
@@ -57,10 +59,10 @@
   }
   function decodeJson(j) {
     var r = j && (j.result || j), list = Array.isArray(r) ? r : r && (r.signed_key_images || r.signedKeyImages || r.keyImages);
-    if (!Array.isArray(list)) throw err('format', 'Fichier JSON non reconnu : il doit contenir « signed_key_images ».');
+    if (!Array.isArray(list)) throw err('format', T('ki.json'));
     var items = list.map(function (k) {
       var ki = String(k.key_image || k.keyImage || k.hex || '').toLowerCase(), sig = String(k.signature || '').toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(ki) || !/^[0-9a-f]{128}$/.test(sig)) throw err('format', 'Une key image du fichier est mal formée.');
+      if (!/^[0-9a-f]{64}$/.test(ki) || !/^[0-9a-f]{128}$/.test(sig)) throw err('format', T('ki.malformed'));
       return [ki, sig];
     });
     return { format: 'json-rpc', offset: Number(r.offset || 0) >>> 0, items: items };
@@ -71,13 +73,13 @@
     if (startsWithMagic(u8)) out = await decodeBinary(u8, viewKeyHex, pub);
     else {
       var text = new TextDecoder().decode(u8).trim();
-      if (/^ur:xmr-keyimage\//i.test(text)) throw err('ur', 'Les QR codes animés (UR) de Feather ne sont pas encore pris en charge : enregistrez plutôt les key images dans un fichier.');
+      if (/^ur:xmr-keyimage\//i.test(text)) throw err('ur', T('ki.ur'));
       if (/^[0-9a-fA-F]+$/.test(text) && text.length % 2 === 0) {
         var b = unhex(text);
-        if (!startsWithMagic(b)) throw err('format', 'Texte hexadécimal non reconnu comme export de key images.');
+        if (!startsWithMagic(b)) throw err('format', T('ki.hex'));
         out = await decodeBinary(b, viewKeyHex, pub);
       } else {
-        var j; try { j = JSON.parse(text); } catch (e) { throw err('format', 'Fichier non reconnu. Choisissez le fichier créé par « export_key_images » ou le fichier « _keyImages » de Feather.'); }
+        var j; try { j = JSON.parse(text); } catch (e) { throw err('format', T('ki.unknown')); }
         out = decodeJson(j);
       }
     }
