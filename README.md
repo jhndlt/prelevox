@@ -46,7 +46,7 @@ Ce que voit le nœud : votre adresse IP, l'heure de synchro et les plages de blo
 
 Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et « classique ».
 - « matrix » s'inspire de l'écran de réglages de Bitchat : police monospace (`ui-monospace`, donc SF Mono sur iPhone et Mac, sans fichier de police à charger), tout en minuscules sauf les titres de section et les badges, cartes teintées à bord fin et coins de 12 px, et badges à bord orange. Le fond est noir `#0A0A0A` avec l'orange Monero `#FF6600`.
-- Une pluie de caractères orange défile en fond (`js/theme.js`) : opacité 16 %, environ 14 images/s, arrêtée en arrière-plan. Elle reste fixe si le système demande de réduire les animations.
+- Fond noir uni (le fond animé « pluie de caractères » a été retiré en v8).
 - Le choix est gardé dans `localStorage` (`px-ui`) et appliqué avant le premier affichage. Il ne contient aucune donnée sensible.
 - Les adresses, les commandes, les saisies et le montant principal gardent leur casse d'origine.
 
@@ -101,3 +101,10 @@ Le réglage « Apparence » propose deux choix : « matrix » (par défaut) et �
 - App : cloche → « Activer les notifications » (abonnement `pushManager` + envoi des alertes au serveur, resynchronisées à chaque changement), statut « Alertes envoyées même app fermée », bouton « Désactiver » (efface tout sur le serveur). Le service worker affiche chaque push et ouvre `#/prix` au toucher.
 - iPhone : iOS 16.4 ou plus, Prelevox **ajouté à l'écran d'accueil** et ouvert depuis son icône, puis cloche → « Activer les notifications ».
 - Test : `python3 tests/e2e-push.py` (origine https://jhndlt.github.io simulée en local, attend le cron, vérifie la notification reçue).
+
+## v8 (local) : sans fond animé, direction artistique « cyberpunk » façon Bitchat
+
+- Fond animé (pluie de caractères) supprimé : plus de canvas, plus de boucle d'animation, plus de réglage associé (`js/theme.js` ne gère plus que le choix du thème).
+- Thème « matrix » refait sur le modèle des écrans d'infos de Bitchat iOS : noir pur et plat, monospace partout, minuscules, tout en orange #FF6600, texte secondaire orange à 65 %, titres de section en CAPITALES grasses, listes à plat avec icônes au trait (22 px) et chevron « > » si la ligne est cliquable, aucun halo. Les gris (#1c1c1e / #3a3a3c) ne servent qu'aux commandes : segments, pastilles, boutons, bouton fermer rond.
+- Réglages : en-tête centré « prelevox » + segments « réglages | infos ». L'onglet « infos » regroupe Mode d'emploi, Fonctionnalités, Confidentialité, Symboles et À propos.
+- Le thème « classique » reste disponible dans Réglages → Apparence.

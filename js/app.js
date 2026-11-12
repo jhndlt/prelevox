@@ -333,7 +333,7 @@
   async function loadPrice(force) {
     var P = S.prix, cur = P.cur, period = P.period;
     if (force) PX.clear();
-    P.loading = true; P.err = null; if (route() === 'prix') paintPrix();
+    P.loading = true; P.err = null; P.tried = Date.now(); if (route() === 'prix') paintPrix();
     try {
       var r = await Promise.all([PX.snapshot(cur), PX.history(cur, period)]);
       P.snap = r[0]; P.hist = { cur: cur, period: period, points: r[1].points, source: r[1].source }; P.at = Date.now();
@@ -420,6 +420,16 @@
       S.push.err = null; await applyServerAlerts(d.alerts);
     } catch (e) { S.push.err = 'Serveur d\u2019alertes injoignable : ' + (e.message || 'erreur') + '. Les alertes restent vérifiées quand l\u2019app est ouverte.'; }
   }
+  async function applyFired() { // alertes déclenchées par le serveur, notées par le service worker
+    try {
+      if (!self.caches) return;
+      var c = await caches.open('prelevox-fired'), r = await c.match('./fired'); if (!r) return;
+      var list = await r.json(), changed = false;
+      list.forEach(function (f) { S.alerts.forEach(function (a) { if (a.id === f.id && f.at > (a.armedAt || a.created || 0) && f.at > (a.firedAt || 0)) { a.firedAt = f.at; changed = true; } }); });
+      await c.delete('./fired');
+      if (changed) { await V.setSetting('alerts', S.alerts); if (S.sheet.open) openSheet(); else if (route() === 'prix') paintPrix(); }
+    } catch (e) {}
+  }
   function pushBlock() {
     if (S.push.on) return '<div class="alert ok mt pushst"><b>✓ Alertes envoyées même app fermée</b><br>Le serveur vérifie le cours toutes les 5 minutes et vous envoie une notification.' +
       (S.push.err ? '<br><span class="warnline">' + esc(S.push.err) + '</span>' : '') +
@@ -442,7 +452,7 @@
   function sheetHtml() {
     var k = S.sheet.kind, cur = S.sheet.cur || S.prix.cur, ns = notifState(), sn = S.prix.snap;
     return '<div class="sheet-bg" data-act="close-sheet"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="shtt"><div class="grab"></div>' +
-      '<div class="sheet-h"><b id="shtt">Alertes de prix</b><button class="lockbtn" data-act="close-sheet" aria-label="Fermer">✕</button></div>' +
+      '<div class="sheet-h"><b id="shtt">Alertes de prix</b><button class="lockbtn xbtn" data-act="close-sheet" aria-label="Fermer">✕</button></div>' +
       '<form id="alf"><div class="seg" role="radiogroup">' + [['above', 'Au-dessus de'], ['below', 'En-dessous de'], ['change', 'Variation']].map(function (x) { return '<button type="button" class="' + (k === x[0] ? 'on' : '') + '" data-alk="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>' +
       '<div class="f mt"><label for="alv">' + (k === 'change' ? 'Variation sur 24 h (en %, hausse ou baisse)' : 'Prix du XMR') + '</label><div class="alin"><input id="alv" inputmode="decimal" autocomplete="off" required placeholder="' + (k === 'change' ? '5' : sn ? Math.round(sn.price * (k === 'above' ? 1.05 : 0.95)) : '600') + '">' +
       (k === 'change' ? '<span class="unit">%</span>' : '<div class="seg alcur">' + ['eur', 'usd'].map(function (c) { return '<button type="button" class="' + (cur === c ? 'on' : '') + '" data-alc="' + c + '">' + sym(c) + '</button>'; }).join('') + '</div>') + '</div>' +
@@ -529,15 +539,77 @@
       '<button class="btn" id="addb" disabled>Ajouter en lecture seule</button></form>' +
       '<p class="note">' + KEY_MSG + '</p>';
   };
+  /* Icônes au trait (22 px, couleur du texte) pour les listes Réglages / Infos */
+  var LI = (function () {
+    var P = {
+      palette: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="10" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="16" cy="10" r="1.2"/><path d="M12 21a3 3 0 0 1 0-6h2a3 3 0 0 0 3-3"/>',
+      flask: '<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/>',
+      wallet: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M16 15h2M6 6l9-3 2 3"/>',
+      key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/>',
+      coins: '<ellipse cx="9" cy="7" rx="6" ry="3"/><path d="M3 7v5c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/><path d="M9 15v2c0 1.7 2.7 3 6 3s6-1.3 6-3v-5c0-1.7-2.7-3-6-3"/>',
+      bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+      euro: '<path d="M17 6.5A7 7 0 1 0 17 17.5"/><path d="M4 10h9M4 14h9"/>',
+      refresh: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
+      eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+      list: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+      cal: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+      chart: '<path d="M3 17l5-5 4 3 8-8M15 7h5v5"/>',
+      lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+      shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+      server: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+      hand: '<path d="M12 2v6M5 12h14M12 16v6"/><circle cx="12" cy="12" r="9"/>',
+      info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+      plus: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+      pull: '<path d="M12 4v13M7 12l5 5 5-5M5 21h14"/>'
+    };
+    var o = {}; Object.keys(P).forEach(function (k) { o[k] = '<span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true">' + P[k] + '</svg></span>'; });
+    return o;
+  })();
+  function irow(icon, title, desc, href) { // ligne d'information : icône, titre, description ; chevron si cliquable
+    var inner = icon + '<div class="t"><div>' + title + '</div><small>' + desc + '</small></div>';
+    return href ? '<a class="row go" href="' + href + '">' + inner + '</a>' : '<div class="row">' + inner + '</div>';
+  }
+  function cyHead(tab) {
+    return '<div class="cyhead"><h1>prelevox</h1><p>monero · lecture seule</p></div>' +
+      '<div class="seg regseg" role="tablist">' + [['reglages', 'réglages'], ['infos', 'infos']].map(function (x) { return '<button role="tab" aria-selected="' + (tab === x[0]) + '" class="' + (tab === x[0] ? 'on' : '') + '" data-regtab="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  }
+  views.infos = function () {
+    var open = !S.demo && V.isOpen();
+    var h = cyHead('infos');
+    h += '<h2>Mode d\u2019emploi</h2><div class="card">' +
+      irow(LI.plus, 'Ajoutez un portefeuille', 'Collez votre adresse et votre view key : Prelevox voit vos réceptions, jamais rien d\u2019autre.', S.demo ? '' : '#/ajouter') +
+      irow(LI.pull, 'Tirez pour actualiser', 'Tirez l\u2019écran vers le bas : nouveaux blocs, nouveau cours. Le logo scanne pendant la lecture.') +
+      irow(LI.key, 'Solde exact', 'Importez vos key images (Feather ou monero-wallet-cli) pour que vos dépenses soient aussi comptées.', open ? '#/exact' : '') +
+      irow(LI.bell, 'Alertes de prix', 'Onglet Prix, puis la cloche : au-dessus, en-dessous ou variation en 24 h.', '#/prix') + '</div>';
+    h += '<h2>Fonctionnalités</h2><div class="card">' +
+      irow(LI.list, 'Opérations', 'Réceptions et dépenses du jour, avec leurs confirmations.', '#/operations') +
+      irow(LI.cal, 'Bientôt', 'Paiements attendus dans les 30 prochains jours.', '#/bientot') +
+      irow(LI.refresh, 'Abonnements', 'Détectés dans vos sorties ou ajoutés par vous.', '#/abonnements') +
+      irow(LI.chart, 'Prix', 'Cours du XMR en € ou en $, via CoinGecko puis Kraken en secours.', '#/prix') + '</div>';
+    h += '<h2>Confidentialité</h2><div class="card">' +
+      irow(LI.hand, 'Aucune clé de dépense', 'Aucune fonction d\u2019envoi n\u2019existe : vos fonds ne peuvent pas bouger depuis Prelevox.') +
+      irow(LI.shield, 'Chiffré sur cet appareil', 'AES-GCM 256 bits, clé dérivée par PBKDF2-SHA-256 (600 000 itérations), dans le stockage local du navigateur.') +
+      irow(LI.server, 'Nœud Monero', 'Il fournit les blocs et voit votre adresse IP, jamais votre view key. Votre propre nœud est le plus privé.') +
+      irow(LI.bell, 'Serveur d\u2019alertes', 'Seulement si vous activez les notifications : ' + esc(SERVER_TXT.charAt(0).toLowerCase() + SERVER_TXT.slice(1))) + '</div>';
+    h += '<h2>Symboles</h2><div class="card">' +
+      irow('<span class="ic">↓</span>', 'Réception', 'Des XMR arrivent sur un de vos portefeuilles.') +
+      irow('<span class="ic">↑</span>', 'Dépense', 'Des XMR sortent (visible avec les key images).') +
+      irow('<span class="ic">≈</span>', 'Estimé', 'Montant ou contre-valeur approximatifs.') +
+      irow('<span class="ic">⧗</span>', 'En attente', 'Transaction dans le mempool, pas encore dans un bloc.') +
+      irow(LI.lock, 'Verrouiller', 'Referme le coffre : votre phrase sera redemandée.') + '</div>';
+    h += '<h2>À propos</h2><div class="card">' + irow(LI.info, 'Prelevox', 'La déclinaison Monero de Prelevo. Lecture seule, sans compte, sans publicité.') + '</div>';
+    return h + note();
+  };
   views.reglages = function () {
     var p = S.settings;
-    var h = header() + '<h1 class="title">Réglages</h1>';
+    if (S.regTab === 'infos') return views.infos();
+    var h = cyHead('reglages');
     var ui = self.PxTheme ? PxTheme.get() : 'classique';
-    h += '<h2>Apparence</h2><div class="card"><div class="row"><div class="t"><div>Thème</div><small>« matrix » : police monospace et pluie de code orange en fond. « classique » : l\u2019interface d\u2019origine.</small></div></div>' +
+    h += '<h2>Apparence</h2><div class="card"><div class="row">' + LI.palette + '<div class="t"><div>Thème</div><small>« matrix » : fond noir, police monospace, style terminal orange. « classique » : l\u2019interface d\u2019origine.</small></div></div>' +
       '<div class="opts" role="radiogroup" aria-label="Apparence">' + ['matrix', 'classique'].map(function (t) { return '<button class="opt' + (ui === t ? ' on' : '') + '" role="radio" aria-checked="' + (ui === t) + '" data-ui="' + t + '">' + t + '</button>'; }).join('') + '</div></div>';
-    h += '<h2>Mode</h2><div class="card"><div class="row"><div class="t"><div>Mode démo</div><small>Données fictives, aucune connexion</small></div><button class="pill' + (S.demo ? ' on' : '') + '" data-act="' + (S.demo ? 'quit-demo' : 'demo') + '">' + (S.demo ? 'Activé' : 'Désactivé') + '</button></div></div>';
+    h += '<h2>Mode</h2><div class="card"><div class="row">' + LI.flask + '<div class="t"><div>Mode démo</div><small>Données fictives, aucune connexion</small></div><button class="pill' + (S.demo ? ' on' : '') + '" data-act="' + (S.demo ? 'quit-demo' : 'demo') + '">' + (S.demo ? 'Activé' : 'Désactivé') + '</button></div></div>';
     if (!S.demo && V.isOpen()) {
-      h += '<h2>Portefeuilles</h2><div class="card">' + (S.wallets.map(function (w) { return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small><span class="addr mono">' + esc(K.short(w.address)) + '</span> · view key chiffrée</small></div><button class="lockbtn" data-del-w="' + esc(w.id) + '" aria-label="Retirer">✕</button></div>'; }).join('') || '<p class="empty">Aucun.</p>') + '</div><a class="btn ghost mt" href="#/ajouter">Ajouter un portefeuille</a>';
+      h += '<h2>Portefeuilles</h2><div class="card">' + (S.wallets.map(function (w) { return '<div class="row">' + LI.wallet + '<div class="t"><div>' + esc(w.label) + '</div><small><span class="addr mono">' + esc(K.short(w.address)) + '</span> · view key chiffrée</small></div><button class="lockbtn" data-del-w="' + esc(w.id) + '" aria-label="Retirer">✕</button></div>'; }).join('') || '<p class="empty">Aucun.</p>') + '</div><a class="btn ghost mt" href="#/ajouter">Ajouter un portefeuille</a>';
       var custom = p.node && p.node !== 'auto' && Sync.NODES.indexOf(p.node) < 0;
       h += '<h2>Synchronisation</h2><form id="setf" class="card"><div class="f mt"><label for="pv">Source</label><select id="pv">' + Object.keys(Sync.providers).filter(function (k) { return k !== 'demo'; }).map(function (k) { return '<option value="' + k + '"' + (p.provider === k ? ' selected' : '') + '>' + esc(Sync.providers[k].label) + '</option>'; }).join('') + '</select><div class="msg">' + esc(Sync.get(p.provider).description) + '</div></div>';
       if (p.provider !== 'lws') {
@@ -552,18 +624,18 @@
           '<div class="alert warn">Avec cette source, la view key est transmise à <b>votre</b> serveur pour qu\u2019il scanne. Elle ne permet aucun envoi, mais révèle vos entrées.</div>';
       }
       h += '<button class="btn">Enregistrer</button><div class="f"></div></form>';
-      h += '<h2>Solde exact</h2><div class="card"><div class="row"><div class="t"><div>Key images</div><small>' + (S.wallets.filter(function (w) { return S.kis[w.id]; }).length) + ' portefeuille' + (S.wallets.length > 1 ? 's' : '') + ' sur ' + S.wallets.length + ' avec key images importées</small></div><a class="pill" href="#/exact">Gérer</a></div></div>';
-      h += '<h2>Cours du XMR</h2><div class="card"><div class="row"><div class="t"><div>Devise de l\u2019onglet Prix</div><small>Euro par défaut. Les alertes gardent la devise choisie à leur création.</small></div></div><div class="opts">' + ['eur', 'usd'].map(function (c) { return '<button class="opt' + (S.prix.cur === c ? ' on' : '') + '" data-pcur="' + c + '">' + (c === 'eur' ? 'euro (€)' : 'dollar ($)') + '</button>'; }).join('') + '</div></div>';
-      h += '<h2>Alertes de prix</h2><div class="card"><div class="row"><div class="t"><div>' + (S.push.on ? 'Envoyées même app fermée' : 'Seulement quand l\u2019app est ouverte') + '</div><small>' + (S.push.on ? 'Serveur d\u2019alertes Prelevox (Cloudflare), vérification toutes les 5 minutes.' : 'Activez les notifications depuis l\u2019onglet Prix (cloche).') + '</small></div>' + (S.push.on ? '<button class="pill" data-act="push-off">Désactiver</button>' : '') + '</div><p class="small pad">Ce qui est stocké sur le serveur : ' + esc(SERVER_TXT.charAt(0).toLowerCase() + SERVER_TXT.slice(1)) + '</p></div>';
-      h += '<h2>Contre-valeur en euros</h2><div class="card"><div class="row"><div class="t"><div>Afficher le solde en €</div><small>Cours XMR/EUR via CoinGecko (ou Kraken). Aucune adresse ni clé n\u2019est envoyée.</small></div><button class="pill' + (p.price ? ' on' : '') + '" data-act="toggle-price">' + (p.price ? 'Activé' : 'Désactivé') + '</button></div></div>';
+      h += '<h2>Solde exact</h2><div class="card"><div class="row">' + LI.key + '<div class="t"><div>Key images</div><small>' + (S.wallets.filter(function (w) { return S.kis[w.id]; }).length) + ' portefeuille' + (S.wallets.length > 1 ? 's' : '') + ' sur ' + S.wallets.length + ' avec key images importées</small></div><a class="pill" href="#/exact">Gérer</a></div></div>';
+      h += '<h2>Cours du XMR</h2><div class="card"><div class="row">' + LI.coins + '<div class="t"><div>Devise de l\u2019onglet Prix</div><small>Euro par défaut. Les alertes gardent la devise choisie à leur création.</small></div></div><div class="opts">' + ['eur', 'usd'].map(function (c) { return '<button class="opt' + (S.prix.cur === c ? ' on' : '') + '" data-pcur="' + c + '">' + (c === 'eur' ? 'euro (€)' : 'dollar ($)') + '</button>'; }).join('') + '</div></div>';
+      h += '<h2>Alertes de prix</h2><div class="card"><div class="row">' + LI.bell + '<div class="t"><div>' + (S.push.on ? 'Envoyées même app fermée' : 'Seulement quand l\u2019app est ouverte') + '</div><small>' + (S.push.on ? 'Serveur d\u2019alertes Prelevox (Cloudflare), vérification toutes les 5 minutes.' : 'Activez les notifications depuis l\u2019onglet Prix (cloche).') + '</small></div>' + (S.push.on ? '<button class="pill" data-act="push-off">Désactiver</button>' : '') + '</div><p class="small pad">Ce qui est stocké sur le serveur : ' + esc(SERVER_TXT.charAt(0).toLowerCase() + SERVER_TXT.slice(1)) + '</p></div>';
+      h += '<h2>Contre-valeur en euros</h2><div class="card"><div class="row">' + LI.euro + '<div class="t"><div>Afficher le solde en €</div><small>Cours XMR/EUR via CoinGecko (ou Kraken). Aucune adresse ni clé n\u2019est envoyée.</small></div><button class="pill' + (p.price ? ' on' : '') + '" data-act="toggle-price">' + (p.price ? 'Activé' : 'Désactivé') + '</button></div></div>';
       h += '<h2>Données de synchronisation</h2><div class="card">' + S.wallets.map(function (w) {
         var r = S.results[w.id];
-        return '<div class="row"><div class="t"><div>' + esc(w.label) + '</div><small>Depuis le bloc ' + nf(w.restoreHeight || 0) + ' (≈ ' + new Date(Sync.dateFromHeight(w.restoreHeight || 0)).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) + ')' + (r ? ' · lu jusqu\u2019au bloc ' + nf(r.balance.height) : '') + '</small></div><button class="pill" data-rescan="' + esc(w.id) + '">Relire</button></div>';
+        return '<div class="row">' + LI.refresh + '<div class="t"><div>' + esc(w.label) + '</div><small>Depuis le bloc ' + nf(w.restoreHeight || 0) + ' (≈ ' + new Date(Sync.dateFromHeight(w.restoreHeight || 0)).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) + ')' + (r ? ' · lu jusqu\u2019au bloc ' + nf(r.balance.height) : '') + '</small></div><button class="pill" data-rescan="' + esc(w.id) + '">Relire</button></div>';
       }).join('') + '</div>';
       h += '<h2>Sécurité</h2><button class="btn ghost" data-act="lock">Verrouiller maintenant</button>';
     }
     if (S.vaultExists) h += '<button class="btn danger mt" data-act="wipe">Tout effacer de cet appareil</button>';
-    return h + '<h2>À propos</h2><div class="alert info"><b>Prelevox</b> est la déclinaison Monero de Prelevo. Aucune clé de dépense n\u2019est acceptée, aucune fonction d\u2019envoi n\u2019existe. Clés chiffrées par AES-GCM 256 bits (PBKDF2-SHA-256, 600 000 itérations) dans le stockage local du navigateur.</div>' + note();
+    return h + '<h2>À propos</h2><div class="card">' + irow(LI.info, 'Prelevox', 'Aucune clé de dépense acceptée, aucune fonction d\u2019envoi. Détails dans « infos ».') + '</div>' + note();
   };
 
   /* ---------- Formulaire d'ajout : validation en direct ---------- */
@@ -645,7 +717,7 @@
     if (r === 'reglages') bindSettings();
     if (r === 'soldes') bindChart();
     if (r === 'exact') bindExact();
-    if (r === 'prix') { tickUpdated(); if (!S.prix.snap && !S.prix.loading) loadPrice(false); }
+    if (r === 'prix') { tickUpdated(); if (!S.prix.snap && !S.prix.loading && Date.now() - (S.prix.tried || 0) > 30000) loadPrice(false); } // pas de boucle si les deux sources sont injoignables
     applyBars();
     if (!skipScroll) window.scrollTo(0, 0);
     skipScroll = false;
@@ -742,7 +814,8 @@
     m.textContent = S.nodeTest;
   }
   document.addEventListener('click', async function (e) {
-    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del],button[data-ui],[data-pcur],[data-pper],[data-alk],[data-alc],[data-al-del],[data-al-rearm]'); if (!t) return;
+    var t = e.target.closest('[data-act],[data-del-w],[data-del-sub],[data-rescan],[data-kitab],[data-ki-out],[data-ki-del],button[data-ui],[data-pcur],[data-pper],[data-alk],[data-alc],[data-al-del],[data-al-rearm],[data-regtab]'); if (!t) return;
+    if (t.dataset.regtab) { S.regTab = t.dataset.regtab; render(); return; }
     if (t.dataset.pcur) { S.prix.cur = t.dataset.pcur; S.sheet.cur = null; await V.setSetting('priceCur', S.prix.cur); if (route() === 'prix') { paintPrix(); loadPrice(false); } else { skipScroll = true; render(); } return; }
     if (t.dataset.pper) { S.prix.period = t.dataset.pper; paintPrix(); loadPrice(false); return; }
     if (t.dataset.alk) { S.sheet.kind = t.dataset.alk; openSheet(); return; }
@@ -817,7 +890,9 @@
     } catch (e) { console.error(e); }
     render();
     if (S.alerts.length) checkAlerts(); // à chaque lancement
-    if (S.push.on) pushSync().then(function () { if (route() === 'prix') paintPrix(); });
+    if (S.push.on) applyFired().then(pushSync).then(function () { if (route() === 'prix') paintPrix(); });
+    if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', function (e) { if (e.data && e.data.type === 'px-fired') applyFired(); });
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && S.push.on) applyFired(); });
     if (self.PxPtr) PxPtr.init({
       canStart: function () { var r = route(); return !S.sheet.open && ['soldes', 'prix', 'operations', 'bientot', 'abonnements'].indexOf(r) >= 0; },
       onRefresh: refreshAll
